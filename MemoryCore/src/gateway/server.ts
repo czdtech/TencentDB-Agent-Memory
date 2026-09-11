@@ -653,6 +653,12 @@ export class TdaiGateway {
     // Initialize core
     await this.core.initialize();
 
+    // Warm local embedding after asynchronous store initialization. Remote
+    // providers are stateless/no-op; local providers load asynchronously.
+    void this.core.warmupEmbedding().catch((err) => {
+      this.logger.warn(`Embedding warmup failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    });
+
     // ── Initialize Opik tracer for offload server ──
     await initServerOpikTracer(this.logger);
 

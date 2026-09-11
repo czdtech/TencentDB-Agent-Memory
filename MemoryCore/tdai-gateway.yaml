@@ -76,7 +76,8 @@ memory:
   storeBackend: "sqlite"
 
   embedding:
-    provider: "none"               # 默认关闭向量搜索, 仅用 BM25
+    provider: "local"              # bundled embeddinggemma-300m via node-llama-cpp
+    modelCacheDir: "~/.cache/tencentdb-embedding"
     # 开启向量搜索示例:
     # provider: "openai"
     # baseUrl: "https://api.openai.com/v1"

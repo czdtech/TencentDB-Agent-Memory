@@ -13,6 +13,8 @@
  * - Throws on failure; callers decide fallback strategy.
  */
 
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { Logger } from "../types.js";
 
 // ============================
@@ -132,6 +134,17 @@ export class EmbeddingNotReadyError extends Error {
 
 const TAG = "[memory-tdai][embedding]";
 
+/** Resolve user-home shorthand without turning it into a repo-relative path. */
+function resolveModelCacheDir(cacheDir?: string): string | undefined {
+  const trimmed = cacheDir?.trim();
+  if (!trimmed) return undefined;
+  if (trimmed === "~") return homedir();
+  if (trimmed.startsWith("~/") || trimmed.startsWith("~\\")) {
+    return join(homedir(), trimmed.slice(2));
+  }
+  return trimmed;
+}
+
 // ============================
 // Local (node-llama-cpp) implementation
 // ============================
@@ -201,7 +214,7 @@ export class LocalEmbeddingService implements EmbeddingService {
 
   constructor(config?: LocalEmbeddingConfig, logger?: Logger, importLlama?: ImportLlamaFn) {
     this.modelPath = config?.modelPath?.trim() || DEFAULT_LOCAL_MODEL;
-    this.modelCacheDir = config?.modelCacheDir?.trim();
+    this.modelCacheDir = resolveModelCacheDir(config?.modelCacheDir);
     this.logger = logger;
     this.importLlama = importLlama ?? defaultImportLlama;
   }
@@ -254,7 +267,7 @@ export class LocalEmbeddingService implements EmbeddingService {
    * @throws {EmbeddingNotReadyError} if model is not yet ready.
    */
   async embed(text: string, _options?: EmbeddingCallOptions): Promise<Float32Array> {
-    this.assertReady();
+    await this.waitUntilReady();
     const truncated = this.truncateInput(text);
     const embedding = await this.embeddingContext!.getEmbeddingFor(truncated);
     return sanitizeAndNormalize(embedding.vector);
@@ -266,7 +279,7 @@ export class LocalEmbeddingService implements EmbeddingService {
    */
   async embedBatch(texts: string[], _options?: EmbeddingCallOptions): Promise<Float32Array[]> {
     if (texts.length === 0) return [];
-    this.assertReady();
+    await this.waitUntilReady();
 
     const results: Float32Array[] = [];
     for (const text of texts) {
@@ -295,6 +308,23 @@ export class LocalEmbeddingService implements EmbeddingService {
       this.initError = null;
       this.logger?.info(`${TAG} Local embedding resources released`);
     }
+  }
+
+  /**
+   * Wait for startup warmup when a request arrives during model loading.
+   * This prevents harmless startup races from becoming metadata-only writes.
+   */
+  private async waitUntilReady(): Promise<void> {
+    // Some secondary routes can receive the first request before the shared
+    // core warmup hook reaches their embedding instance. Start lazily here so
+    // every route observes the same ready-before-embed contract.
+    if (this.initState === "idle") {
+      this.startWarmup();
+    }
+    if (this.initState === "initializing" && this.initPromise) {
+      await this.initPromise;
+    }
+    this.assertReady();
   }
 
   /**

@@ -157,6 +157,8 @@ export class TdaiCore {
   private vectorStore?: IMemoryStore;
   private embeddingService?: EmbeddingService;
   private scheduler?: MemoryPipelineManager;
+  private needsEmbeddingReindex = false;
+  private embeddingReindexReason?: string;
   /**
    * Promise gate for the one-shot scheduler-start sequence.
    *
@@ -530,6 +532,38 @@ export class TdaiCore {
     return this.embeddingService;
   }
 
+  /**
+   * Start embedding warmup after asynchronous store initialization completes.
+   * This is intentionally non-blocking for local model download/load.
+   */
+  async warmupEmbedding(): Promise<void> {
+    await this.storeReady;
+    const embedding = this.embeddingService;
+    if (!embedding) return;
+    embedding.startWarmup();
+    const deadline = Date.now() + 15 * 60_000;
+    while (!embedding.isReady() && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    if (!embedding.isReady()) {
+      throw new Error("Embedding service did not become ready before reindex deadline");
+    }
+    if (this.needsEmbeddingReindex && this.vectorStore?.reindexAll) {
+      const reason = this.embeddingReindexReason ?? "embedding configuration changed";
+      this.logger.info(`${TAG} Starting embedding reindex: ${reason}`);
+      const result = await this.vectorStore.reindexAll(
+        (text) => embedding.embed(text),
+        (done, total, layer) => {
+          if (done === total || done % 100 === 0) {
+            this.logger.info(`${TAG} Reindex progress ${layer} ${done}/${total}`);
+          }
+        },
+      );
+      this.logger.info(`${TAG} Embedding reindex finished: L1=${result.l1Count}, L0=${result.l0Count}`);
+      this.needsEmbeddingReindex = false;
+    }
+  }
+
   /** Get the pipeline scheduler (may be undefined if extraction disabled). */
   getScheduler(): MemoryPipelineManager | undefined {
     return this.scheduler;
@@ -612,6 +646,8 @@ export class TdaiCore {
       const stores = await initStores(this.cfg, this.dataDir, this.logger);
       this.vectorStore = stores.vectorStore;
       this.embeddingService = stores.embeddingService;
+      this.needsEmbeddingReindex = stores.needsReindex;
+      this.embeddingReindexReason = stores.reindexReason;
       this.logger.debug?.(`${TAG} Stores initialized: backend=${this.cfg.storeBackend}, embedding=${this.cfg.embedding.provider}`);
     } catch (err) {
       this.logger.warn(

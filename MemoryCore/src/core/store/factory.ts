@@ -131,16 +131,20 @@ export function createStoreBundle(
     default: {
       // ── Embedding service (only when enabled) ──
       let embeddingService: EmbeddingService | undefined;
-      if (config.embedding.enabled && config.embedding.provider !== "local" && config.embedding.apiKey) {
-        embeddingService = createEmbeddingService({
-          provider: config.embedding.provider,
-          baseUrl: config.embedding.baseUrl,
-          apiKey: config.embedding.apiKey,
-          model: config.embedding.model,
-          dimensions: config.embedding.dimensions,
-          sendDimensions: config.embedding.sendDimensions,
-          maxInputChars: config.embedding.maxInputChars,
-        }, logger);
+      if (config.embedding.enabled && config.embedding.provider !== "none") {
+        if (config.embedding.provider === "local") {
+          embeddingService = createEmbeddingService({ provider: "local", modelCacheDir: config.embedding.modelCacheDir }, logger);
+        } else if (config.embedding.apiKey) {
+          embeddingService = createEmbeddingService({
+            provider: config.embedding.provider,
+            baseUrl: config.embedding.baseUrl,
+            apiKey: config.embedding.apiKey,
+            model: config.embedding.model,
+            dimensions: config.embedding.dimensions,
+            sendDimensions: config.embedding.sendDimensions,
+            maxInputChars: config.embedding.maxInputChars,
+          }, logger);
+        }
       }
 
       // dimensions from config (0 when provider="none" → vec0 deferred)

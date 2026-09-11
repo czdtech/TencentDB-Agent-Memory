@@ -340,6 +340,8 @@ export function createApp(config: ProxyConfig): Hono {
   }
 
   app.post("/:agent/:spaceId/v1/messages", (c) => handleAnthropicMessages(c, config));
+  app.post("/:agent/:spaceId/messages", (c) => handleAnthropicMessages(c, config));
+  app.post("/:agent/:spaceId/messages/count_tokens", (c) => handleAuxiliaryEndpoint(c, config));
   app.post("/:agent/:spaceId/v1/messages/count_tokens", (c) => handleAuxiliaryEndpoint(c, config));
   app.post("/:agent/:spaceId/v1/embeddings", (c) => handleAuxiliaryEndpoint(c, config));
   app.post("/:agent/:spaceId/v1/completions", (c) => handleAuxiliaryEndpoint(c, config));

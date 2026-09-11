@@ -52,6 +52,13 @@ export const WHITELIST_ENDPOINTS: readonly WhitelistEndpoint[] = [
     isPrimary: true,
   },
   {
+    pathSuffix: "/messages",
+    upstreamEndpoint: "/messages",
+    protocol: "anthropic",
+    supportsStream: true,
+    isPrimary: true,
+  },
+  {
     pathSuffix: "/v1/chat/completions",
     upstreamEndpoint: "/chat/completions",
     protocol: "openai",
@@ -61,6 +68,13 @@ export const WHITELIST_ENDPOINTS: readonly WhitelistEndpoint[] = [
   // ── 辅助端点（由 handleAuxiliaryEndpoint 处理，不走路由）─────────
   {
     pathSuffix: "/v1/messages/count_tokens",
+    upstreamEndpoint: "/messages/count_tokens",
+    protocol: "anthropic",
+    supportsStream: false,
+    isPrimary: false,
+  },
+  {
+    pathSuffix: "/messages/count_tokens",
     upstreamEndpoint: "/messages/count_tokens",
     protocol: "anthropic",
     supportsStream: false,

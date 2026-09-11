@@ -28,6 +28,7 @@ import { getMetadataClient } from "../meta/client.js";
 import type { AgentContext } from "../injection/types.js";
 import { resolveFixedAssetCtxs, type FixedAssetCtx } from "../injection/injectors/tdai-fixed-asset.js";
 import type { TdaiIdentity } from "../tdai/types.js";
+import { TdaiClient } from "../tdai/client.js";
 import { emitBridgeToolCallTelemetry, emitBridgeRejectTelemetry, agentSourceFromSessionKey } from "./bridge-telemetry.js";
 
 const TAG = "[memory-bridge]";
@@ -227,12 +228,49 @@ async function resolveMemoryCtxs(config: ProxyConfig, ids: SessionIdFields, sess
   }
 }
 
-function selectTargetCtx(ctxs: FixedAssetCtx[], requestedAgentId: unknown): FixedAssetCtx {
+function selectTargetCtx(ctxs: FixedAssetCtx[], requestedAgentId: unknown): FixedAssetCtx | null {
   if (typeof requestedAgentId === "string" && requestedAgentId.trim()) {
     const found = ctxs.find((ctx) => ctx.agentId === requestedAgentId.trim());
-    if (found) return found;
+    return found ?? null;
   }
   return ctxs.find((ctx) => ctx.isSelf) ?? ctxs[0];
+}
+
+async function filterAuthorizedMemoryCtxs(
+  config: ProxyConfig,
+  ids: SessionIdFields,
+  ctxs: FixedAssetCtx[],
+): Promise<FixedAssetCtx[]> {
+  const userKey = ids.user_key;
+  if (!userKey) return ctxs.filter((target) => target.isSelf);
+  const client = new TdaiClient({
+    enabled: config.tdai.enabled && config.tdai.memory.enabled,
+    endpoint: config.tdai.endpoint,
+    apiKey: config.tdai.apiKey,
+    serviceId: ids.space_id || config.tdai.serviceId,
+    writeL0: config.tdai.memory.writeL0,
+    recallL1: config.tdai.memory.recallL1,
+    injectL2L3: config.tdai.memory.injectL2L3,
+    l1Limit: config.tdai.memory.l1Limit,
+    l2Limit: config.tdai.memory.l2Limit,
+    timeoutMs: config.tdai.memory.timeoutMs,
+  });
+  const checked = await Promise.all(ctxs.map(async (target) => {
+    if (target.isSelf) return target;
+    try {
+      const result = await client.checkAcl({
+        user_key: userKey,
+        asset_id: `chat_memory-${target.teamId}-${target.agentId}`,
+        agent_id: ids.agent_id,
+        action: "read",
+      });
+      return result.allowed ? target : null;
+    } catch (err) {
+      console.warn(`${TAG} ACL check failed target=${target.agentId}; deny: ${(err as Error).message}`);
+      return null;
+    }
+  }));
+  return checked.filter((target): target is FixedAssetCtx => target !== null);
 }
 
 const MULTI_SEARCH_SUBPATHS = new Set(["atomic/search", "conversation/search"]);
@@ -374,7 +412,11 @@ export function createMemoryBridgeHandler(
       "Content-Type": "application/json",
     };
 
-    const ctxs = await resolveMemoryCtxs(config, ids, sessionKey);
+    const ctxs = await filterAuthorizedMemoryCtxs(
+      config,
+      ids,
+      await resolveMemoryCtxs(config, ids, sessionKey),
+    );
     // task_id 优先级：caller 显式传 > session 注入。session_id 保持"仅 caller 显式传"，
     // 因为 search 类希望默认跨 session（agent 维度）；task_id 属于身份维度，仍应强制。
     const effectiveTaskId = modelTaskId ?? ids.task_id;
@@ -484,7 +526,11 @@ export function createMemoryBridgeHandler(
 
     let upstream;
     try {
-      upstream = await callUpstream(selectTargetCtx(ctxs, inboundBody.agent_id));
+      const target = selectTargetCtx(ctxs, inboundBody.agent_id);
+      if (!target) {
+        return envelope(40303, `${TAG} requested agent memory is not authorized`, 403);
+      }
+      upstream = await callUpstream(target);
     } catch (err) {
       console.warn(
         `${TAG} upstream fetch failed sub=${sub} err=${(err as Error).message}`,

@@ -65,9 +65,29 @@ export class TdaiL1RecallInjector implements InjectionHook {
       : null;
     const ctxs = await resolveFixedAssetCtxs(ctx, identity, mc);
 
+    // Imported memories are assets, not implicit team visibility. Enforce the
+    // kernel ACL before querying another agent's L1 store.
+    const authorizedCtxs = this.aclClient && userKey
+      ? (await Promise.all(ctxs.map(async (c) => {
+          if (c.isSelf) return c;
+          try {
+            const acl = await this.aclClient!.checkAcl({
+              user_key: userKey,
+              asset_id: `chat_memory-${c.teamId}-${c.agentId}`,
+              agent_id: identity.agentId,
+              action: "read",
+            });
+            return acl.allowed ? c : null;
+          } catch (err) {
+            console.warn(`[${this.id}] ACL check failed for imported agent=${c.agentId}; denying read:`, (err as Error).message);
+            return null;
+          }
+        }))).filter((c): c is typeof ctxs[number] => c !== null)
+      : ctxs;
+
     // 并发对每个 ctx search L1
     const groups = await Promise.all(
-      ctxs.map(async (c) => {
+      authorizedCtxs.map(async (c) => {
         const items = await this.client.searchL1ForCtx(
           { teamId: c.teamId, userId: c.userId, agentId: c.agentId, agentName: c.agentName },
           query,
@@ -112,7 +132,7 @@ export class TdaiL1RecallInjector implements InjectionHook {
         metadata: {
           source: this.id,
           count: merged.length,
-          sources: ctxs.map((c) => c.agentId),
+          sources: authorizedCtxs.map((c) => c.agentId),
         },
       },
     ];

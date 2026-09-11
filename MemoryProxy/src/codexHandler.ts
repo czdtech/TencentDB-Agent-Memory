@@ -1175,7 +1175,6 @@ async function forwardToUpstream(
     sessionKey: keyId,
     upstreamUrl,
     stream: true,
-    traceId,
   });
 
   // ── 上游 4xx/5xx：拷贝一份 body 文本用于 langfuse 错误上报；成功则 tap ──

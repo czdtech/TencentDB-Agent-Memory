@@ -570,7 +570,11 @@ export async function handleAnthropicMessages(
     ? _pathPartsEarly[0] : undefined;
   const agentAdapter = resolveAgentAdapter(_agentFromPathEarly ?? "claude-code");
   const ccRoutingEnabled = config.ccRequestRouting?.enabled === true;
-  const requestKind: CcRequestKind = ccRoutingEnabled ? agentAdapter.classifyRequest(body) : "main";
+  const _classified = ccRoutingEnabled ? agentAdapter.classifyRequest(body) : "main";
+  // Non-CC adapters may return "auxiliary", which is outside the CC
+  // main/fork/sidequery taxonomy. Narrow to CcRequestKind; anything else is main.
+  const requestKind: CcRequestKind =
+    _classified === "fork" ? "fork" : _classified === "sidequery" ? "sidequery" : "main";
 
   // ── Model gate: reject requests whose `model` is not a registered display name ──
   // 价目表已配置时，客户端 `model` 必须匹配某条 entry 的 `modelName`（展示名，

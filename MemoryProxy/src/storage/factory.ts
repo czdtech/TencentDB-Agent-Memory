@@ -99,7 +99,12 @@ export async function initProxyStorage(config: StorageConfig): Promise<ProxyStor
   if (_instance) return _instance;
   if (config.backend === "cos") {
     try {
-      const mod = await import("@context-proxy/cost-guard");
+      // cost-guard 是可选 submodule：packages/cost-guard/ 目录可能为空（开源
+      // clone 后未 update submodule），主仓 tsc 不能依赖其类型声明 —— 见
+      // src/storage/cos-types.ts 头注释。拼接 specifier 避开对固定模块名的
+      // 解析，运行时 import 行为不变。
+      const costGuardModuleId = "@context-proxy/" + "cost-guard";
+      const mod = (await import(costGuardModuleId)) as Record<string, unknown>;
       if (typeof mod.openKernelStsCosBackend === "function") {
         _kernelStsFactory = mod.openKernelStsCosBackend as (opts: KernelStsCosOptions) => CosLikeBackend;
       } else {

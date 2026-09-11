@@ -1025,6 +1025,12 @@ export function createL3Runner(opts: {
         agentId: scopeIsolation.agentId,
         layer: "l3",
       }));
+      const authoritativeMemoryCount = vectorStore && !vectorStore.isDegraded()
+        ? await vectorStore.countL1({
+            teamId: scopeIsolation?.teamId ?? "default",
+            agentId: scopeIsolation?.agentId ?? "default",
+          })
+        : undefined;
       const generator = new PersonaGenerator({
         dataDir: scopedDir,
         config: openclawConfig,
@@ -1037,6 +1043,7 @@ export function createL3Runner(opts: {
         llmRunner,
         storage: scopedStore,
         traceContext: scopeIsolation,
+        memoryCount: authoritativeMemoryCount,
       });
       const genResult = await generator.generateLocalPersona(reason);
 

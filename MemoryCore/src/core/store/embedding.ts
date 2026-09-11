@@ -63,6 +63,8 @@ export interface EmbeddingProviderInfo {
   provider: string;
   /** Model identifier (e.g. "embeddinggemma-300m", "text-embedding-3-large") */
   model: string;
+  /** Client-side input cap used when generating vectors (local models). */
+  maxInputChars?: number;
 }
 
 export interface EmbeddingCallOptions {
@@ -157,15 +159,13 @@ const DEFAULT_LOCAL_MODEL =
 const LOCAL_DIMENSIONS = 768;
 
 /**
- * embeddinggemma-300m has a 256-token context window.
- * As a safe heuristic, we limit input to ~600 chars for CJK text
- * (CJK characters typically tokenize to 1-2 tokens each,
- *  so 600 chars ≈ 200-400 tokens, keeping well within 256-token limit
- *  after accounting for special tokens).
- * For Latin text, ~800 chars is a safe limit (~200 tokens).
- * We use 512 chars as a conservative universal limit.
+ * EmbeddingGemma-300m's published context is ~2048 tokens (not 256).
+ * Same heuristic as before: ~2 chars/token as a conservative mix of CJK
+ * (often 1–2 tokens/char) and Latin. 2048 tokens → 4096 chars.
+ * Still one vector per record; longer SOP/agent prompts no longer lose
+ * everything after the first 512 characters.
  */
-const LOCAL_MAX_INPUT_CHARS = 512;
+const LOCAL_MAX_INPUT_CHARS = 4096;
 
 /**
  * Sanitize NaN/Inf values and L2-normalize the vector.
@@ -224,7 +224,7 @@ export class LocalEmbeddingService implements EmbeddingService {
   }
 
   getProviderInfo(): EmbeddingProviderInfo {
-    return { provider: "local", model: this.modelPath };
+    return { provider: "local", model: this.modelPath, maxInputChars: LOCAL_MAX_INPUT_CHARS };
   }
 
   /**
@@ -353,8 +353,7 @@ export class LocalEmbeddingService implements EmbeddingService {
 
   /**
    * Truncate input text to stay within the model's context window.
-   * embeddinggemma-300m has a 256-token limit; we use a character-based
-   * heuristic (LOCAL_MAX_INPUT_CHARS) as a safe proxy.
+   * Character cap is a proxy for EmbeddingGemma's ~2048-token context.
    */
   private truncateInput(text: string): string {
     if (text.length <= LOCAL_MAX_INPUT_CHARS) return text;

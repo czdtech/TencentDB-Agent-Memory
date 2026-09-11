@@ -78,6 +78,7 @@ memory:
   embedding:
     provider: "local"              # bundled embeddinggemma-300m via node-llama-cpp
     modelCacheDir: "~/.cache/tencentdb-embedding"
+    # Local truncates each record at 4096 chars (~EmbeddingGemma 2K-token window).
     # 开启向量搜索示例:
     # provider: "openai"
     # baseUrl: "https://api.openai.com/v1"

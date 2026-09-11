@@ -68,6 +68,13 @@ export function parsePresetIdentity(
   };
 }
 
+export function parseRouteIdentity(config: SessionInitConfig, route: string): PresetIdentity | undefined {
+  const item = config.routeIdentities?.[route];
+  return item?.team_id && item.agent_id
+    ? { teamId: item.team_id, agentId: item.agent_id, taskId: item.task_id }
+    : undefined;
+}
+
 /**
  * Validate a preset identity against the user-visible team list.
  *

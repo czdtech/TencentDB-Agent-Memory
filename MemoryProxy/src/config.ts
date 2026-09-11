@@ -245,18 +245,19 @@ function parseCostGuard(yaml: RawYamlConfig): CostGuardConfig {
  * a glance).
  */
 function parseUpstreamAgents(
-  raw: Record<string, { url?: string; apiKey?: string } | null | undefined> | undefined,
-): Record<string, { url: string; apiKey?: string }> {
+  raw: Record<string, { url?: string; apiKey?: string; inheritApiKey?: boolean } | null | undefined> | undefined,
+): Record<string, { url: string; apiKey?: string; inheritApiKey?: boolean }> {
   if (!raw || typeof raw !== "object") return {};
-  const out: Record<string, { url: string; apiKey?: string }> = {};
+  const out: Record<string, { url: string; apiKey?: string; inheritApiKey?: boolean }> = {};
   for (const [name, entry] of Object.entries(raw)) {
     if (!entry || typeof entry !== "object") continue;
     const url = (entry as { url?: unknown }).url;
     if (typeof url !== "string" || url.length === 0) continue;
     const apiKey = (entry as { apiKey?: unknown }).apiKey;
+    const inheritApiKey = (entry as { inheritApiKey?: unknown }).inheritApiKey === true;
     out[name] = typeof apiKey === "string" && apiKey.length > 0
-      ? { url, apiKey }
-      : { url };
+      ? { url, apiKey, ...(inheritApiKey ? { inheritApiKey: true } : {}) }
+      : { url, ...(inheritApiKey ? { inheritApiKey: true } : {}) };
   }
   return out;
 }
@@ -423,6 +424,7 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
       ? (yaml.sessionInit.defaultTaskId.trim() || undefined)   // empty string → disabled
       : DEFAULT_CONFIG.sessionInit.defaultTaskId,
     skipAssetConfirm: yaml.sessionInit?.skipAssetConfirm ?? DEFAULT_CONFIG.sessionInit.skipAssetConfirm,
+    routeIdentities: yaml.sessionInit?.routeIdentities ?? {},
     headerAutoSelect: {
       enabled: yaml.sessionInit?.headerAutoSelect?.enabled ?? DEFAULT_CONFIG.sessionInit.headerAutoSelect!.enabled,
       teamHeader: (yaml.sessionInit?.headerAutoSelect?.teamHeader ?? DEFAULT_CONFIG.sessionInit.headerAutoSelect!.teamHeader).toLowerCase(),

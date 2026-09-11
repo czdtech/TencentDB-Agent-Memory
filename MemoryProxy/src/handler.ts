@@ -855,7 +855,7 @@ export async function handleChatCompletions(
   console.log(`[injection-debug] conversationId=${conversationId} sessionKey=${sessionKey} userId=${userId} agentSource=${agentSource} kind=${_requestKind} dshHeadless=${_dshHeadless} sessionInitEnabled=${config.sessionInit?.enabled} injectionEnabled=${config.injection?.enabled} injectors=${JSON.stringify(config.injection?.injectors)} injectedSkipped=${injectedSkipped} spaceId=${spaceId}`);
   if (config.sessionInit?.enabled && conversationId && !isAuxiliary && !_dshHeadless) {
     try {
-      const { getSessionStore, handleSessionInit, parsePresetIdentity } = await import("./session/index.js");
+      const { getSessionStore, handleSessionInit, parsePresetIdentity, parseRouteIdentity } = await import("./session/index.js");
       const { getMetadataClient } = await import("./meta/client.js");
       const store = getSessionStore();
       // kernel /v3/meta/* 走 x-tdai-user-key 鉴权，需要 sk-mem-* 用户 key。
@@ -870,7 +870,7 @@ export async function handleChatCompletions(
       // 与 workbuddyHandler.ts 里的 kernelUserKey 逻辑对齐（那里也是客户端优先）。
       const kernelUserKey = apiKey || config.tdai?.apiKey || "";
       const metadataClient = getMetadataClient(config.coreSkill, spaceId, kernelUserKey);
-      const presetIdentity = parsePresetIdentity(config.sessionInit, lcHeaders);
+      const presetIdentity = parsePresetIdentity(config.sessionInit, lcHeaders) ?? parseRouteIdentity(config.sessionInit, agentSource);
 
       // ── Session Recovery: try L2b binding before falling into session-init form ──
       const compositeKey = `${agentSource}:${sessionKey}`;

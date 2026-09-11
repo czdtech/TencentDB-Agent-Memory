@@ -235,6 +235,17 @@ export function createApp(config: ProxyConfig): Hono {
   app.post("/codex/:spaceId/realtime/calls", (c) => handleCodexEndpoint(c, config));
   app.post("/codex/:spaceId/responses", (c) => handleCodexEndpoint(c, config));
 
+  // Named TencentDB model routes use the same Responses handler as codex.
+  // The first path segment selects upstream.agents[route].
+  app.post("/:agent/:spaceId/v1/responses/compact", (c) => handleCodexEndpoint(c, config));
+  app.post("/:agent/:spaceId/v1/memories/trace_summarize", (c) => handleCodexEndpoint(c, config));
+  app.post("/:agent/:spaceId/v1/realtime/calls", (c) => handleCodexEndpoint(c, config));
+  app.post("/:agent/:spaceId/v1/responses", (c) => handleCodexEndpoint(c, config));
+  app.post("/:agent/:spaceId/responses/compact", (c) => handleCodexEndpoint(c, config));
+  app.post("/:agent/:spaceId/memories/trace_summarize", (c) => handleCodexEndpoint(c, config));
+  app.post("/:agent/:spaceId/realtime/calls", (c) => handleCodexEndpoint(c, config));
+  app.post("/:agent/:spaceId/responses", (c) => handleCodexEndpoint(c, config));
+
   // ── Workbuddy endpoints (must precede generic /:agent/:spaceId routes) ────
   // WorkBuddy CLI/Desktop 客户端走 OpenAI Responses API（与 Codex 同协议），
   // 但客户端行为与 codex-cli 有差异（sub-path 更多：compact / trace_summarize

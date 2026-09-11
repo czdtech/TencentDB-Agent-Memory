@@ -282,6 +282,8 @@ export interface SessionInitConfig {
    * 默认 false（保持原有行为，弹 asset_confirm 对话框）。
    */
   skipAssetConfirm?: boolean;
+  /** Per-route preset identity (keyed by first URL path segment / upstream.agents name). */
+  routeIdentities?: Record<string, { team_id: string; agent_id: string; task_id?: string }>;
   headerAutoSelect?: {
     /** 是否启用 header 自动预选。默认 true。 */
     enabled: boolean;
@@ -417,6 +419,8 @@ export interface AgentUpstreamEntry {
    * that fallback only applies when this agent has no entry at all.
    */
   apiKey?: string;
+  /** Use the global upstream apiKey while keeping this route explicit. */
+  inheritApiKey?: boolean;
 }
 
 /** Top-level proxy configuration (merged from config file + CLI args). */
@@ -879,6 +883,7 @@ export interface RawYamlConfig {
     injectAgentContext?: boolean;
     injectTaskContext?: boolean;
     defaultTaskId?: string;
+    routeIdentities?: SessionInitConfig["routeIdentities"];
     debugForceIdentity?: {
       team_id?: string;
       agent_id?: string;

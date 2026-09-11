@@ -34,6 +34,7 @@ import { joinUrl } from "./guard-adapter.js";
 import { verifyUserKey } from "./auth.js";
 import { resolveModelId } from "./pricing.js";
 import { codexAdapter } from "./agent-adapters/codex.js";
+import { resolveNamedRoute } from "./namedRoute.js";
 import {
   DEFAULT_GATE_PREFIX,
   buildFormResponse as buildCodexFormResponse,
@@ -456,11 +457,11 @@ export async function handleCodexEndpoint(
   // 本 handler 返一次 Plan 模式提示；后续同 session 请求 bypass 稳态透传。
   if (config.sessionInit?.enabled && sessionId) {
     try {
-      const { getSessionStore, handleSessionInit, parsePresetIdentity } = await import("./session/index.js");
+      const { getSessionStore, handleSessionInit, parsePresetIdentity, parseRouteIdentity } = await import("./session/index.js");
       const { getMetadataClient } = await import("./meta/client.js");
       const store = getSessionStore();
       const metadataClient = getMetadataClient(config.coreSkill, spaceId, apiKey);
-      const presetIdentity = parsePresetIdentity(config.sessionInit, headers);
+      const presetIdentity = parsePresetIdentity(config.sessionInit, headers) ?? parseRouteIdentity(config.sessionInit, "codex");
 
       const compositeKey = `${agentSource}:${sessionKey}`;
       const identity = {
@@ -1099,7 +1100,8 @@ async function forwardToUpstream(
   // 对齐 anthropicHandler.ts:1029 的解析姿势。codex 通常需要单独指向支持
   // Responses API 的兼容层——部分 OpenAI 兼容上游只实现
   // messages/chat_completions，不支持 /responses，此处允许按 agent 覆盖。
-  const agentUpstreamEntry = config.upstream.agents?.["codex"];
+  const routeName = resolveNamedRoute(c.req.path, "codex");
+  const agentUpstreamEntry = config.upstream.agents?.[routeName];
   let upstreamBase = agentUpstreamEntry?.url || config.upstream.url;
   let upstreamUrl = joinUrl(upstreamBase, c.req.path);
   const upstreamHeaders = buildUpstreamHeaders(c, config);

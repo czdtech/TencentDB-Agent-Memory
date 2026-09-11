@@ -182,10 +182,23 @@ export class AnthropicAdapter implements ProtocolAdapter {
   }
 
   private parseTool(raw: Record<string, unknown>): AgentTool {
+    let name = (raw.name as string) ?? "";
+    let description = (raw.description as string) ?? "";
+    let parameters = (raw.input_schema as Record<string, unknown>) ?? {};
+
+    if (!name && raw.function && typeof raw.function === "object" && raw.function !== null) {
+      const fn = raw.function as Record<string, unknown>;
+      name = (fn.name as string) ?? "";
+      description = (fn.description as string) ?? "";
+      parameters = (fn.parameters as Record<string, unknown>) ?? {};
+    } else if (raw.name && !raw.input_schema && raw.parameters) {
+      parameters = raw.parameters as Record<string, unknown>;
+    }
+
     const tool: AgentTool = {
-      name: (raw.name as string) ?? "unknown",
-      description: (raw.description as string) ?? "",
-      parameters: (raw.input_schema as Record<string, unknown>) ?? {},
+      name: name || "unknown",
+      description,
+      parameters,
     };
     if (raw.cache_control !== undefined) {
       tool.cacheControl = raw.cache_control;
@@ -276,10 +289,13 @@ export class AnthropicAdapter implements ProtocolAdapter {
   }
 
   private serializeTool(tool: AgentTool): Record<string, unknown> {
+    const params = (tool.parameters && typeof tool.parameters === "object")
+      ? tool.parameters
+      : { type: "object", properties: {} };
     const out: Record<string, unknown> = {
       name: tool.name,
       description: tool.description,
-      input_schema: tool.parameters,
+      input_schema: (params as Record<string, unknown>).type ? params : { type: "object", ...params },
     };
     if (tool.cacheControl !== undefined) {
       out.cache_control = tool.cacheControl;

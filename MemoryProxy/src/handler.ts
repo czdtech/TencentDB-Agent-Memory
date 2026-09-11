@@ -2083,6 +2083,12 @@ function createUsageTapTransform(ctx: TapContext): TransformStream<Uint8Array, U
   let lastUsage: Record<string, unknown> | null = null;
   let assistantContent = "";
   const toolCallAccumulators = new Map<number, ToolCallAccumulator>();
+  let finalizePromise: Promise<void> | null = null;
+
+  function finalizeOnce(): Promise<void> {
+    if (!finalizePromise) finalizePromise = finalize();
+    return finalizePromise;
+  }
 
   function processSseChunk(chunk: string): void {
     sseBuf += chunk;
@@ -2094,6 +2100,9 @@ function createUsageTapTransform(ctx: TapContext): TransformStream<Uint8Array, U
       const { content, toolCallDeltas } = extractSseContentAndTools(part);
       assistantContent += content;
       mergeToolCallDeltas(toolCallAccumulators, toolCallDeltas);
+      if (/data:\s*\[DONE\]/.test(part)) {
+        void finalizeOnce().catch((err: unknown) => pipe.error("STREAM_FINALIZE", err));
+      }
     }
   }
 
@@ -2366,7 +2375,7 @@ function createUsageTapTransform(ctx: TapContext): TransformStream<Uint8Array, U
     },
     async flush() {
       try {
-        await finalize();
+        await finalizeOnce();
       } catch (err: unknown) {
         pipe.error("STREAM_FINALIZE", err);
       }

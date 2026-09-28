@@ -139,3 +139,6 @@ MemoryCore/scripts/bench-l0-mongo/reports/
 # Local-only: parity snapshots & runtime configs (never commit)
 MemoryProxy/.archive-tmp/
 z_config/
+
+# local WSL glue MCP (lives under ~/.config/tdai-wsl/mcp)
+MemoryKnowledge/bin/tencentdb-mcp.mjs

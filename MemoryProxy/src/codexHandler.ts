@@ -34,7 +34,7 @@ import { joinUrl } from "./guard-adapter.js";
 import { verifyUserKey } from "./auth.js";
 import { resolveModelId } from "./pricing.js";
 import { codexAdapter } from "./agent-adapters/codex.js";
-import { resolveNamedRoute } from "./namedRoute.js";
+import { resolveNamedRoute, resolveClientAgentSource } from "./namedRoute.js";
 import {
   DEFAULT_GATE_PREFIX,
   buildFormResponse as buildCodexFormResponse,
@@ -175,6 +175,10 @@ export function extractCodexSessionId(
   body: Record<string, unknown>,
 ): string | null {
   if (headers["session-id"]) return headers["session-id"];
+  if (headers["x-grok-session-id"]) return headers["x-grok-session-id"];
+  if (headers["x-grok-conv-id"]) return headers["x-grok-conv-id"];
+  if (headers["x-session-id"]) return headers["x-session-id"];
+  if (headers["x-conversation-id"]) return headers["x-conversation-id"];
   const meta = body.client_metadata as { session_id?: string } | undefined;
   if (typeof meta?.session_id === "string") return meta.session_id;
   return null;
@@ -353,7 +357,7 @@ export async function handleCodexEndpoint(
   // ── 6. Session ID extraction ───────────────────────────────────────────────
   const sessionId = extractCodexSessionId(headers, body);
   const sessionKey = sessionId ?? `${keyId}:${traceId}`;
-  const agentSource = "codex";
+  const agentSource = resolveClientAgentSource(resolveNamedRoute(path, "codex"));
   const isStream = body.stream !== false;
 
   const callerUserKey = apiKey || null;
@@ -461,7 +465,7 @@ export async function handleCodexEndpoint(
       const { getMetadataClient } = await import("./meta/client.js");
       const store = getSessionStore();
       const metadataClient = getMetadataClient(config.coreSkill, spaceId, apiKey);
-      const presetIdentity = parsePresetIdentity(config.sessionInit, headers) ?? parseRouteIdentity(config.sessionInit, "codex");
+      const presetIdentity = parsePresetIdentity(config.sessionInit, headers) ?? parseRouteIdentity(config.sessionInit, agentSource);
 
       const compositeKey = `${agentSource}:${sessionKey}`;
       const identity = {
@@ -762,7 +766,7 @@ export async function handleCodexEndpoint(
         pipe.info("CODEX_MEM_CMD", `mem command intercepted: ${memCmd.command}`);
         const memResult = await executeMemCommand(memCmd, {
           sessionKey,
-          agentSource: "codex",
+          agentSource,
           config,
           spaceId,
           userId: userId || "",
@@ -777,7 +781,7 @@ export async function handleCodexEndpoint(
           bodyMessages: extractSimpleMessages(input),
           // 方案 D：taskDraft LLM 跟随主模型 —— codex 固定 agent，上游复用 per-agent url
           model: modelId,
-          upstreamUrl: config.upstream.agents?.["codex"]?.url || config.upstream.url,
+          upstreamUrl: config.upstream.agents?.[agentSource]?.url || config.upstream.agents?.["codex"]?.url || config.upstream.url,
           // codex 主链路走 OpenAI Responses API
           upstreamProtocol: "responses",
         });
@@ -812,7 +816,7 @@ export async function handleCodexEndpoint(
             await triggerSkillExtractIfReady({
               config,
               sessionKey,
-              agentSource: "codex",
+              agentSource,
               sessionInfo: sessionInfo as Record<string, unknown>,
               inputMessages: input,
               assistantMessage,
@@ -1119,7 +1123,7 @@ async function forwardToUpstream(
   {
     const spaceId = extractSpaceIdFromPath(c.req.path) ?? "";
     const instanceConfigs = await getInstanceUpstreamConfigs(config.coreSkill, spaceId);
-    const convCfg = resolveUpstreamConfig(instanceConfigs, "codex", "conversation");
+    const convCfg = resolveUpstreamConfig(instanceConfigs, routeName, "conversation");
     if (shouldOverride(convCfg)) {
       upstreamUrl = joinUrl(convCfg.base_url, c.req.path);
       if (convCfg.mode === "custom_unified" && convCfg.api_key) {

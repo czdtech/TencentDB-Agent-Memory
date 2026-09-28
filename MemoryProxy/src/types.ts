@@ -705,6 +705,10 @@ export interface SystemUserEntry {
 
 /** Credit usage reporting to external service (e.g. TDAI MemoryPlus). */
 export interface CreditReportConfig {
+  /** When explicitly false, credit reporting is skipped entirely.
+   *  For self-hosted / personal deployments with no billing gateway.
+   *  Defaults to true (report) when unset. */
+  enabled?: boolean;
   /** POST endpoint URL. */
   url: string;
   /** Request timeout in ms. */
@@ -860,7 +864,7 @@ export interface RawYamlConfig {
     flushAt?: number;
     flushInterval?: number;
   };
-  creditReport?: { url?: string; timeoutMs?: number };
+  creditReport?: { enabled?: boolean; url?: string; timeoutMs?: number };
   creditPricing?: { models?: (Partial<CreditPricingEntry> & { tiers?: Partial<PricingTier>[] })[] };
   /** Opaque private review options, forwarded to the extension untouched. */
   badcaseCollector?: Record<string, unknown>;

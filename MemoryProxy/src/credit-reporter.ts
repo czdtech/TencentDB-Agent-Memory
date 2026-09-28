@@ -311,6 +311,15 @@ export async function tryReportCreditFromPath(
     return { attempted: false, ok: false };
   }
 
+  // Opt-out switch: `creditReport.enabled: false` in proxy.yaml skips the
+  // report entirely. attempted=false means callers stay silent — no
+  // CREDIT_REPORT error log, no x-credit-report-error header, no
+  // failed-report row — which is what self-hosted deployments want when
+  // there is no billing gateway to talk to.
+  if (config.enabled === false) {
+    return { attempted: false, ok: false };
+  }
+
   const spaceId = extractSpaceIdFromPath(path);
   if (!spaceId || !usage || Object.keys(usage).length === 0) {
     return { attempted: false, ok: false };

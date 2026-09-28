@@ -368,6 +368,7 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
     },
     costGuard: parseCostGuard(yaml),
     creditReport: {
+      enabled: yaml.creditReport?.enabled ?? true,
       url: yaml.creditReport?.url ?? DEFAULT_CONFIG.creditReport.url,
       timeoutMs: yaml.creditReport?.timeoutMs ?? DEFAULT_CONFIG.creditReport.timeoutMs,
     },

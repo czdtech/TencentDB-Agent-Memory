@@ -368,15 +368,50 @@ async function forwardWithRetry(
       protocol: "openai",
     });
   }
+  let isTimeout = false;
   try {
     upstreamResp = await fetch(target.url, fetchOpts);
   } catch (err: unknown) {
     if (err instanceof DOMException && err.name === "TimeoutError") {
+      isTimeout = true;
       pipe.error("FORWARD", `Timeout after ${forwardTimeoutMs / 1000}s`);
     } else {
       pipe.error("FORWARD", err);
     }
     forwardFailed = true;
+  }
+
+  // ── Transient 502/503/504 in-place retry ───────────────────────────────────
+  // Upstream edge gateways (e.g. Railway) occasionally return transient 502 Bad Gateway
+  // or 503 Service Unavailable during container restarts or edge reconnections.
+  // Perform one quick retry (500ms backoff) to prevent downstream clients (like OpenCode)
+  // from immediately canceling tasks and triggering unwanted model fallback.
+  if (
+    !isTimeout &&
+    (forwardFailed || (upstreamResp && upstreamResp.status >= 502 && upstreamResp.status <= 504)) &&
+    !target.retryTarget
+  ) {
+    const statusText = forwardFailed ? "connection error" : `${upstreamResp!.status}`;
+    pipe.info("FORWARD_RETRY", `Upstream transient error (${statusText}), retrying in 500ms...`);
+    const { promise: delayPromise, resolve: resolveDelay } = Promise.withResolvers<void>();
+    setTimeout(resolveDelay, 500);
+    await delayPromise;
+    try {
+      if (forwardTimeoutMs > 0) {
+        fetchOpts.signal = AbortSignal.timeout(forwardTimeoutMs);
+      }
+      const retryResp = await fetch(target.url, fetchOpts);
+      upstreamResp = retryResp;
+      forwardFailed = false;
+      if (retryResp.ok) {
+        pipe.info("FORWARD_RETRY_SUCCESS", `Retry returned ${retryResp.status}`);
+      } else {
+        pipe.error("FORWARD_RETRY_FAILED", `Retry returned ${retryResp.status}`);
+      }
+    } catch (retryErr: unknown) {
+      pipe.error("FORWARD_RETRY_ERROR", retryErr);
+      forwardFailed = true;
+    }
   }
 
   if (upstreamResp) {

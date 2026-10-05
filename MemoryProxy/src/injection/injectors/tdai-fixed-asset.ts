@@ -1,7 +1,7 @@
 /**
- * Shared helper for chat_memory injectors:
- * resolves (team, user, agent, name) ctx for self + imported ≤2 agents,
- * cached in ctx.metadata.custom for reuse across injectors.
+ * Shared helper for chat_memory injectors.
+ * Retrieval returns every Team1 source, including default.
+ * Injection text uses a separate cap.
  *
  * Now uses MetadataClient (kernel /v3/meta/agent-fixed-asset/list-with-detail)
  * instead of TMC's proxy endpoint.
@@ -22,19 +22,36 @@ export interface FixedAssetCtx {
 }
 
 const CACHE_KEY = "__tdaiFixedAssetCtxs";
+export const TEAM1_ID = "team-9ia01u3k8w";
+export const TEAM1_SOURCE_TEAMS = new Set([
+  "team-9ia01u3k8w",
+  "team-9ia00b0bef",
+  "team-1ff8re4fu4",
+  "default",
+  "team-ewiqjwpy3l",
+]);
+
+export function sourceTeamVisible(callerTeamId: string, sourceTeamId: string): boolean {
+  if (sourceTeamId === callerTeamId) return true;
+  return callerTeamId === TEAM1_ID && TEAM1_SOURCE_TEAMS.has(sourceTeamId);
+}
+
+export function injectionSummary<T>(items: T[], cap: number): T[] {
+  if (!Number.isFinite(cap) || cap < 0) return items;
+  return items.slice(0, cap);
+}
 
 function parseChatMemoryAssetId(assetId: string): { teamId: string; agentId: string } | null {
   if (!assetId.startsWith("chat_memory-")) return null;
-  const marker = "-agt";
-  const idx = assetId.lastIndexOf(marker);
-  if (idx < 0) return null;
   const inner = assetId.slice("chat_memory-".length);
+  const marker = "-agt";
   const dashAgt = inner.lastIndexOf(marker);
-  if (dashAgt < 0) return null;
-  return {
-    teamId: inner.slice(0, dashAgt),
-    agentId: inner.slice(dashAgt + 1),
-  };
+  if (dashAgt >= 0) {
+    return { teamId: inner.slice(0, dashAgt), agentId: inner.slice(dashAgt + 1) };
+  }
+  if (inner === "default") return { teamId: "default", agentId: "default" };
+  if (inner.startsWith("default-")) return { teamId: "default", agentId: inner.slice("default-".length) };
+  return null;
 }
 
 // ── Resolver ───────────────────────────────────────────────────────────────────
@@ -82,14 +99,17 @@ export async function resolveFixedAssetCtxs(
     const items: FixedAssetCtx[] = [];
     for (const item of detail.items) {
       if (item.asset_type !== "chat_memory") continue;
-      const parsed = parseChatMemoryAssetId(item.asset_id);
+      const explicit = item as { team_id?: string; agent_id?: string };
+      const parsed = explicit.team_id && explicit.agent_id
+        ? { teamId: explicit.team_id, agentId: explicit.agent_id }
+        : parseChatMemoryAssetId(item.asset_id);
       if (!parsed) continue;
-      if (parsed.teamId !== selfTeamId) continue;
-      if (parsed.agentId === (selfAgent?.agent_id ?? identity.agentId)) continue;
+      if (!sourceTeamVisible(selfTeamId, parsed.teamId)) continue;
+      if (parsed.agentId === (selfAgent?.agent_id ?? identity.agentId) && parsed.teamId === selfTeamId) continue;
 
       try {
         const sourceAgent = await client.getAgent(parsed.agentId);
-        if (sourceAgent.team_id !== selfTeamId) continue;
+        if (!sourceTeamVisible(selfTeamId, sourceAgent.team_id)) continue;
         items.push({
           teamId: sourceAgent.team_id,
           userId: sourceAgent.owner_user_id ?? identity.userId,
@@ -112,7 +132,7 @@ export async function resolveFixedAssetCtxs(
           agentName: (selfAgent as any)?.name ?? identity.agentId,
           isSelf: true,
         },
-        ...items.slice(0, 2), // max 2 imported
+        ...items,
       ];
     }
   } catch (err) {

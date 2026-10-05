@@ -355,8 +355,9 @@ export const isolationFieldsSchema = z.object({
 export type IsolationFields = z.infer<typeof isolationFieldsSchema>;
 
 /**
- * Pull the three-dim isolation triple from the parsed body or from request
- * headers. Body wins (consistent with how `session_id` is currently sourced).
+ * Pull the three-dim isolation triple from request headers or the body.
+ * A header wins. The body fills a field only when that header is empty.
+ * A disagreement is rejected by scopeFromHttp before a handler runs.
  *
  * Missing fields are filled with the default isolation bucket. This keeps the
  * API backward-compatible while still making ownership explicit in storage.
@@ -365,19 +366,19 @@ export function resolveIsolation(
   body: Record<string, unknown> | undefined,
   headers: Record<string, string | string[] | undefined>,
   opts: { legacyCompatMode?: boolean; legacyPlaceholder?: string } = {},
-): { ok: true; ctx: { userId: string; agentId: string; sessionId: string; taskId?: string } } {
+): { ok: true; ctx: { teamId?: string; userId: string; agentId: string; sessionId: string; taskId?: string } } {
   const headerStr = (k: string): string | undefined => {
     const raw = headers[k] ?? headers[k.toLowerCase()];
     if (Array.isArray(raw)) return raw[0];
     return typeof raw === "string" ? raw : undefined;
   };
-  const teamId = (body?.team_id as string | undefined) ?? headerStr("x-tdai-team-id") ?? "";
-  const userId = (body?.user_id as string | undefined) ?? headerStr("x-tdai-user-id") ?? "";
-  const agentId = (body?.agent_id as string | undefined) ?? headerStr("x-tdai-agent-id") ?? "";
+  const teamId = headerStr("x-tdai-team-id") || (body?.team_id as string | undefined) || "";
+  const userId = headerStr("x-tdai-user-id") || (body?.user_id as string | undefined) || "";
+  const agentId = headerStr("x-tdai-agent-id") || (body?.agent_id as string | undefined) || "";
   const sessionId =
-    (body?.session_id as string | undefined)
-    ?? headerStr("x-tdai-session-id")
-    ?? "";
+    headerStr("x-tdai-session-id")
+    || (body?.session_id as string | undefined)
+    || "";
   const taskId =
     (body?.task_id as string | undefined)
     ?? headerStr("x-tdai-task-id")

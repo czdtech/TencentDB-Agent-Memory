@@ -759,11 +759,11 @@ export async function handleAnthropicMessages(
   const skipSessionInit = requestKind === "sidequery";
   if (config.sessionInit?.enabled && conversationId && !skipSessionInit) {
     try {
-      const { getSessionStore, handleSessionInit, parsePresetIdentity } = await import("./session/index.js");
+      const { getSessionStore, handleSessionInit, parsePresetIdentity, parseRouteIdentity } = await import("./session/index.js");
       const { getMetadataClient } = await import("./meta/client.js");
       const store = getSessionStore();
       const metadataClient = getMetadataClient(config.coreSkill, spaceId, apiKey);
-      const presetIdentity = parsePresetIdentity(config.sessionInit, lcHeaders);
+      const presetIdentity = parsePresetIdentity(config.sessionInit, lcHeaders) ?? parseRouteIdentity(config.sessionInit, agentSource);
 
       // ── Session Recovery: try L2b binding before falling into session-init form ──
       const compositeKey = `${agentSource}:${sessionKey}`;

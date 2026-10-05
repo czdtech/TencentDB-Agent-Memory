@@ -54,7 +54,7 @@ export class TdaiL1RecallInjector implements InjectionHook {
     const query = extractUserQueryText(getMessageText(lastUser)).trim().slice(0, 2048);
     if (!query) return [];
 
-    // 拿 self + 借入 ≤2 个的 ctx 列表
+    // Retrieval uses every visible source. globalTopK caps only the injected text.
     const session = (ctx.metadata.custom as any)?.session as { user_key?: string; space_id?: string } | undefined;
     const userKey = session?.user_key;
     // spaceId 来自 session 注册时保存的 URL path 中的 `/proxy/<spaceId>/...`；
@@ -132,7 +132,9 @@ export class TdaiL1RecallInjector implements InjectionHook {
         metadata: {
           source: this.id,
           count: merged.length,
-          sources: authorizedCtxs.map((c) => c.agentId),
+          sources_searched: authorizedCtxs.map((c) => c.agentId),
+          injection_cap: this.globalTopK,
+          injected_count: merged.length,
         },
       },
     ];

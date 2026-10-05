@@ -265,6 +265,10 @@ export interface CompletedTurn {
   sessionKey: string;
   /** Session ID within the session key (optional, for sub-session grouping). */
   sessionId?: string;
+  /** Caller scope. Headers win over the request body before these are set. */
+  teamId?: string;
+  userId?: string;
+  agentId?: string;
   /** Epoch ms when this turn started. */
   startedAt?: number;
   /**

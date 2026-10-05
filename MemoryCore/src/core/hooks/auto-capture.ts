@@ -47,6 +47,9 @@ export async function performAutoCapture(params: {
   messages: unknown[];
   sessionKey: string;
   sessionId?: string;
+  teamId?: string;
+  userId?: string;
+  agentId?: string;
   cfg: MemoryTdaiConfig;
   pluginDataDir: string;
   logger?: Logger;
@@ -87,7 +90,7 @@ export async function performAutoCapture(params: {
   storage?: StorageAdapter;
 }): Promise<AutoCaptureResult> {
   const {
-    messages, sessionKey, sessionId, cfg, pluginDataDir, logger, scheduler,
+    messages, sessionKey, sessionId, teamId, userId, agentId, cfg, pluginDataDir, logger, scheduler,
     originalUserText, originalUserMessageCount, pluginStartTimestamp,
     vectorStore, embeddingService, bgTaskRegistry, storage,
   } = params;
@@ -185,6 +188,9 @@ export async function performAutoCapture(params: {
           id: generateL0RecordId(sessionKey, i),
           sessionKey,
           sessionId: sessionId || DEFAULT_ISOLATION_ID,
+          teamId,
+          userId,
+          agentId,
           role: msg.role,
           messageText: msg.content,
           recordedAt: now,

@@ -88,18 +88,30 @@ export function resolvePresetIdentity(
   const res: PresetResolution = { canRegister: false, hadMismatch: false };
   if (!preset.teamId) return res;
 
+  console.log(`[resolvePresetIdentity] preset=${JSON.stringify(preset)}, teams.length=${teams.length}`);
+  if (teams.length > 0) {
+    console.log(`[resolvePresetIdentity] first team sample: team_id=${teams[0].team_id}, agents=${teams[0].agents.length}`);
+  }
+
   const team = teams.find((t) => t.team_id === preset.teamId);
   if (!team) {
     // Unknown team → don't trust anything from this header set.
+    console.warn(`[resolvePresetIdentity] team NOT found: preset.teamId="${preset.teamId}", available teams: ${teams.map(t => t.team_id).join(", ")}`);
     res.hadMismatch = true;
     return res;
   }
   res.teamId = team.team_id;
+  console.log(`[resolvePresetIdentity] team FOUND: ${team.team_id}`);
 
   if (preset.agentId) {
     const agent = team.agents.find((a) => a.agent_id === preset.agentId);
-    if (agent) res.agentId = agent.agent_id;
-    else res.hadMismatch = true;
+    if (agent) {
+      res.agentId = agent.agent_id;
+      console.log(`[resolvePresetIdentity] agent FOUND: ${agent.agent_id}`);
+    } else {
+      console.warn(`[resolvePresetIdentity] agent NOT found: preset.agentId="${preset.agentId}", available agents in team: ${team.agents.map(a => a.agent_id).join(", ")}`);
+      res.hadMismatch = true;
+    }
   }
 
   if (preset.taskId) {

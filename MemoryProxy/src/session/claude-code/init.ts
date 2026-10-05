@@ -722,6 +722,10 @@ async function handleSessionInitInner(
     try {
       const cfg = await fetchTeamsAndAgents(userId, config, metadataClient);
       teams = cfg.teams;
+      console.log(`[session-init:cc] session=${compositeKey} userId=${userId} fetched teams.length=${teams.length}`);
+      if (teams.length > 0) {
+        console.log(`[session-init:cc] first team: ${JSON.stringify({ team_id: teams[0].team_id, agents: teams[0].agents.length, tasks: teams[0].tasks.length })}`);
+      }
     } catch (err) {
       console.warn(
         `[session-init:cc] session=${compositeKey} kernel unavailable for user=${userId}, bypassing: ${err instanceof Error ? err.message : String(err)}`,
@@ -762,7 +766,9 @@ async function handleSessionInitInner(
 
     // ── Header-driven pre-selection: skip forms when identity is provided ──
     if (presetIdentity && config.headerAutoSelect?.enabled) {
+      console.log(`[session-init:cc] session=${compositeKey} presetIdentity=${JSON.stringify(presetIdentity)}`);
       const pr = resolvePresetIdentity(teams, presetIdentity);
+      console.log(`[session-init:cc] session=${compositeKey} resolvePresetIdentity result: ${JSON.stringify(pr)}`);
 
       if (pr.hadMismatch) {
         if (config.headerAutoSelect.onMismatch === "bypass") {

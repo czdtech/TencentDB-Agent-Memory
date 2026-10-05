@@ -183,10 +183,14 @@ const PROXY_PREFIX_RE = /^\/proxy\/[^/]+/;
  * lookahead 允许 `/v1/`、`/responses`、`/responses/`、`/memories/`、`/realtime/`
  * 后紧邻，其中 `/v1/` 必须带尾斜杠避免误伤未来出现的 `/v1foo` 之类；responses
  * 等 codex 端点允许尾斜杠可选（如 `/responses` 是完整路径）。
+ * 命名后缀中转站路由（`/newapi-tencent-pro/...`、`/cliproxyapi-tencent-gemini/...`）
+ * 与 `credit-reporter.ts` 的 spaceId 提取保持同一份 agent 名单——两处正则必须
+ * 同步，否则前缀剥不掉会让 `matchWhitelistEndpoint` 落空，`joinUrl` 兜底把
+ * Responses 请求错拼到 `/chat/completions`。
  * 白名单入口 `/v1/messages`、`/responses` 自身不会被误剥（因为它们不匹配 agent
  * 段——agent 段限定为已知名字）。
  */
-const AGENT_PREFIX_RE = /^\/(claude-code|codebuddy|codex|cursor|anthropic|openai|pi|ga|tencent-[a-z0-9-]+)(?:\/[^/]+)?(?=\/v1\/|\/messages(?:\/|$)|\/responses(?:\/|$)|\/memories\/|\/realtime\/)/i;
+const AGENT_PREFIX_RE = /^\/(claude-code|codebuddy|codex|cursor|hermes|openclaw|workbuddy|dsh|opencode|pi|anthropic|openai|ga|(?:newapi-|cliproxyapi-)?tencent-[a-z0-9-]+)(?:\/[^/]+)?(?=\/v1\/|\/messages(?:\/|$)|\/responses(?:\/|$)|\/memories\/|\/realtime\/)/i;
 
 /**
  * `/cost-guard` marker 正则：位于 `/{agent}/{spaceId}` 之后的独立 segment。

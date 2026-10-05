@@ -21,6 +21,7 @@ import { timingSafeEqual } from "node:crypto";
 import zlib from "node:zlib";
 import dayjs from "dayjs";
 import { TdaiCore } from "../core/tdai-core.js";
+import { scopeFromHttp } from "../core/request-scope.js";
 import { StandaloneHostAdapter } from "../adapters/standalone/host-adapter.js";
 import { loadGatewayConfig, parseBrokers } from "./config.js";
 import type { GatewayConfig, GatewayConfigOverrides } from "./config.js";
@@ -1487,9 +1488,19 @@ export class TdaiGateway {
       sendError(res, 400, "Missing required fields: query, session_key");
       return;
     }
+    const decision = scopeFromHttp(req.headers, body as unknown as Record<string, unknown>);
+    if (!decision.ok) {
+      sendError(res, decision.status, decision.message);
+      return;
+    }
 
     const startMs = Date.now();
-    const result = await this.core.handleBeforeRecall(body.query, body.session_key);
+    const result = await this.core.handleBeforeRecall(body.query, body.session_key, {
+      headerTeamId: decision.scope.teamId,
+      headerUserId: decision.scope.userId,
+      headerAgentId: decision.scope.agentId,
+      headerSessionId: decision.scope.sessionId,
+    });
     const elapsed = Date.now() - startMs;
 
     // H-15: distinguish "no recall content to inject" from "recall failed".
@@ -1523,6 +1534,11 @@ export class TdaiGateway {
       sendError(res, 400, "Missing required fields: user_content, assistant_content, session_key");
       return;
     }
+    const decision = scopeFromHttp(req.headers, body as unknown as Record<string, unknown>);
+    if (!decision.ok) {
+      sendError(res, decision.status, decision.message);
+      return;
+    }
 
     const startMs = Date.now();
     const result = await this.core.handleTurnCommitted({
@@ -1533,7 +1549,10 @@ export class TdaiGateway {
         { role: "assistant", content: body.assistant_content },
       ],
       sessionKey: body.session_key,
-      sessionId: body.session_id,
+      sessionId: body.session_id ?? decision.scope.sessionId,
+      teamId: decision.scope.teamId,
+      userId: decision.scope.userId,
+      agentId: decision.scope.agentId,
     });
     const elapsed = Date.now() - startMs;
 
@@ -1553,12 +1572,23 @@ export class TdaiGateway {
       sendError(res, 400, "Missing required field: query");
       return;
     }
+    const decision = scopeFromHttp(req.headers, body as unknown as Record<string, unknown>);
+    if (!decision.ok) {
+      sendError(res, decision.status, decision.message);
+      return;
+    }
 
     const result = await this.core.searchMemories({
       query: body.query,
       limit: body.limit,
       type: body.type,
       scene: body.scene,
+      identity: {
+        headerTeamId: decision.scope.teamId,
+        headerUserId: decision.scope.userId,
+        headerAgentId: decision.scope.agentId,
+        headerSessionId: decision.scope.sessionId,
+      },
     });
 
     const response: MemorySearchResponse = {
@@ -1576,11 +1606,22 @@ export class TdaiGateway {
       sendError(res, 400, "Missing required field: query");
       return;
     }
+    const decision = scopeFromHttp(req.headers, body as unknown as Record<string, unknown>);
+    if (!decision.ok) {
+      sendError(res, decision.status, decision.message);
+      return;
+    }
 
     const result = await this.core.searchConversations({
       query: body.query,
       limit: body.limit,
       sessionKey: body.session_key,
+      identity: {
+        headerTeamId: decision.scope.teamId,
+        headerUserId: decision.scope.userId,
+        headerAgentId: decision.scope.agentId,
+        headerSessionId: decision.scope.sessionId,
+      },
     });
 
     const response: ConversationSearchResponse = {

@@ -25,6 +25,7 @@ import type { Logger } from "../core/types.js";
 import type { IStateBackend } from "../core/state/types.js";
 import type { PipelineWorker } from "../services/pipeline-worker.js";
 import { executeMemorySearch } from "../core/tools/memory-search.js";
+import { scopeFromHttp } from "../core/request-scope.js";
 import { executeConversationSearch } from "../core/tools/conversation-search.js";
 import type { MemoryRecord } from "../core/record/l1-writer.js";
 import { reportRecallMetrics } from "../core/report/metric-tracking-recall.js";
@@ -578,7 +579,7 @@ export async function handleV2Route(
       : await parseJsonBody(req);
     perfMark("parseJsonBody", `dur=${Date.now() - bodyStart}ms len=${req.headers["content-length"] ?? "?"}`);
 
-    // Tenancy isolation — pulled from body (preferred) or x-tdai-* headers
+    // Tenancy isolation — x-tdai-* headers win. The body fills an empty field.
     // and attached to the per-request deps so handlers can persist
     // (user_id, agent_id, session_id) on every L0/L1 write without
     // changing every handler signature.
@@ -591,7 +592,7 @@ export async function handleV2Route(
     // 缺任意一个直接 422，且不走 legacyCompatMode 退化。
     const headers = (req.headers ?? {}) as Record<string, string | string[] | undefined>;
     const isoLegacyCompat = isV3 ? false : (deps.isolationConfig?.legacyCompatMode ?? false);
-    const isoResolved = resolveIsolation(body as Record<string, unknown> | undefined, headers, {
+    let isoResolved = resolveIsolation(body as Record<string, unknown> | undefined, headers, {
       legacyCompatMode: isoLegacyCompat,
       legacyPlaceholder: deps.isolationConfig?.legacyPlaceholder,
     });
@@ -614,6 +615,26 @@ export async function handleV2Route(
         ));
         return true;
       }
+      const authoritative = scopeFromHttp(headers, body as Record<string, unknown> | undefined);
+      if (!authoritative.ok) {
+        sendJson(res, authoritative.status, errorEnvelope(authoritative.status, authoritative.message, requestId));
+        return true;
+      }
+      const scoped = body as Record<string, unknown>;
+      scoped.team_id = authoritative.scope.teamId;
+      scoped.user_id = authoritative.scope.userId;
+      scoped.agent_id = authoritative.scope.agentId;
+      if (!scoped.session_id) scoped.session_id = authoritative.scope.sessionId;
+      isoResolved = {
+        ok: true,
+        ctx: {
+          ...isoResolved.ctx,
+          teamId: authoritative.scope.teamId,
+          userId: authoritative.scope.userId,
+          agentId: authoritative.scope.agentId,
+          sessionId: authoritative.scope.sessionId,
+        },
+      };
     }
 
     const depsWithIsolation: V2RouterDeps = {

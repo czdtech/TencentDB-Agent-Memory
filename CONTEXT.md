@@ -9,16 +9,20 @@
 `deploy/prod` 分支；生产服务直接跑 `~/deploy/tdam` 工作树；该分支已被
 code-graph 索引并绑定到 agent `omp-eval`，auto-sync 每 10 分钟跟随分支更新。
 
-## 三个目录，三种角色（不要混用）
+## 两个目录，两种角色（不要混用）
 
 | 目录 | 角色 | 能做什么 | 不能做什么 |
 |---|---|---|---|
 | `~/code/tencentdb-agent-memory-team`（本目录） | **主克隆 / git 主库**（书房） | 改代码、commit、开分支、push、合并上游 | — |
 | `~/deploy/tdam` | **生产运行目录**（厨房），是本目录的 linked worktree | 只做部署动作：`git checkout --detach deploy/prod` | **禁止改代码**。服务是 `tsx` 直接跑工作树，改文件 = 改运行态 |
-| `~/tencentdb-agent-memory-dev` | dev worktree（历史开发线，停在 `local/prod`@111fd52） | 备查 | 不要在这里开发，避免出现第四条 commit 线 |
 
-- `~/deploy/tdam/.git` 和 dev worktree 的 `.git` 都是指向本目录 `.git/worktrees/*` 的指针文件，
-  已用 `git worktree repair` 修过一次。**不要单独移动或删除任何一处**，三处是一体的。
+> 2026-10-08 清理：dev worktree `~/tencentdb-agent-memory-dev` 已删除
+> （其 commit 线 `local/prod`@111fd52 完全包含于 `deploy/prod`，含未提交的
+> credit-reporter regex fix 也已在 4829672 内）；本地分支只保留 `deploy/prod`。
+> `~/.gitconfig` 的 safe.directory 只剩本目录与 deploy 两项。
+
+- `~/deploy/tdam/.git` 是指向本目录 `.git/worktrees/tdam` 的指针文件。
+  **本目录与 deploy 是一体的**，不要单独移动或删除任何一处。
 - 本目录原在 `~/tencentdb-agent-memory-team`，2026-10-08 迁入 `~/code/`。
 
 ## 分支与 remote

@@ -45,7 +45,10 @@ export function resolveCallerScope(input: ScopeInput): ScopeDecision {
   if (!user.ok) return user;
   const agent = oneField("agent_id", clean(input.headerAgentId), clean(input.bodyAgentId));
   if (!agent.ok) return agent;
-  const session = clean(input.headerSessionId) || clean(input.bodySessionId) || "v1";
+  // No implicit session: an empty sessionId means "not scoped to a session".
+  // Readers must not filter by session unless the caller sent one; writers
+  // fall back to DEFAULT_ISOLATION_ID at their own write points.
+  const session = clean(input.headerSessionId) || clean(input.bodySessionId);
   return {
     ok: true,
     scope: { teamId: team.value, userId: user.value, agentId: agent.value, sessionId: session },

@@ -624,7 +624,9 @@ export async function handleV2Route(
       scoped.team_id = authoritative.scope.teamId;
       scoped.user_id = authoritative.scope.userId;
       scoped.agent_id = authoritative.scope.agentId;
-      if (!scoped.session_id) scoped.session_id = authoritative.scope.sessionId;
+      // Only an explicit session (header or body) may set session_id; otherwise
+      // reads stay cross-session (see handleConversationSearch).
+      if (!scoped.session_id && authoritative.scope.sessionId) scoped.session_id = authoritative.scope.sessionId;
       isoResolved = {
         ok: true,
         ctx: {
@@ -632,7 +634,7 @@ export async function handleV2Route(
           teamId: authoritative.scope.teamId,
           userId: authoritative.scope.userId,
           agentId: authoritative.scope.agentId,
-          sessionId: authoritative.scope.sessionId,
+          sessionId: authoritative.scope.sessionId || isoResolved.ctx.sessionId,
         },
       };
     }

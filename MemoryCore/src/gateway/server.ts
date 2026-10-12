@@ -1549,7 +1549,7 @@ export class TdaiGateway {
         { role: "assistant", content: body.assistant_content },
       ],
       sessionKey: body.session_key,
-      sessionId: body.session_id ?? decision.scope.sessionId,
+      sessionId: body.session_id || decision.scope.sessionId || undefined,
       teamId: decision.scope.teamId,
       userId: decision.scope.userId,
       agentId: decision.scope.agentId,

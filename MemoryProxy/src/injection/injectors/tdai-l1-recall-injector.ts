@@ -4,7 +4,7 @@ import { getLastUserMessage, getMessageText } from "../context.js";
 import type { TdaiClient } from "../../tdai/client.js";
 import { getTdaiIdentity } from "../../tdai/identity.js";
 import { extractUserQueryText } from "../../tdai/recorder.js";
-import type { CoreSkillConfig } from "../../types.js";
+import type { CoreSkillConfig, MemorySuperAdminConfig } from "../../types.js";
 import { getMetadataClient } from "../../meta/client.js";
 import { resolveFixedAssetCtxs } from "./tdai-fixed-asset.js";
 
@@ -36,10 +36,16 @@ export class TdaiL1RecallInjector implements InjectionHook {
     private perAgentLimit: number | undefined = undefined,
     private globalTopK = 5,
     /**
-     * ACL 校验客户端，通常与 `client` 是同一个 TdaiClient 实例。传入后每个
-     * fixed-asset ctx 都会走 acl/check(read) 过滤。为 null 时保留旧行为。
+     * ACL 校验客户端，通常与 `client` 是同一个 TdaiClient 实例。传给共享
+     * resolver 后，每个同 team 借入来源都会走 acl/check(read) 过滤；为 null
+     * 时借入来源一律不注入（fail-closed）。
      */
     private aclClient: TdaiClient | null = null,
+    /**
+     * Cloud super-admin config（YAML `superAdmin:`）。只有配置的超管 team 会拿到
+     * 跨 team 的显式 sources，其余 team 保持 self + 同 team 授权资产。
+     */
+    private superAdmin: MemorySuperAdminConfig | undefined = undefined,
   ) {}
 
   async execute(ctx: AgentContext): Promise<ContextBlock[]> {
@@ -63,31 +69,11 @@ export class TdaiL1RecallInjector implements InjectionHook {
     const mc = this.coreSkillCfg && userKey
       ? getMetadataClient(this.coreSkillCfg, spaceId, userKey)
       : null;
-    const ctxs = await resolveFixedAssetCtxs(ctx, identity, mc);
-
-    // Imported memories are assets, not implicit team visibility. Enforce the
-    // kernel ACL before querying another agent's L1 store.
-    const authorizedCtxs = this.aclClient && userKey
-      ? (await Promise.all(ctxs.map(async (c) => {
-          if (c.isSelf) return c;
-          try {
-            const acl = await this.aclClient!.checkAcl({
-              user_key: userKey,
-              asset_id: `chat_memory-${c.teamId}-${c.agentId}`,
-              agent_id: identity.agentId,
-              action: "read",
-            });
-            return acl.allowed ? c : null;
-          } catch (err) {
-            console.warn(`[${this.id}] ACL check failed for imported agent=${c.agentId}; denying read:`, (err as Error).message);
-            return null;
-          }
-        }))).filter((c): c is typeof ctxs[number] => c !== null)
-      : ctxs;
+    const ctxs = await resolveFixedAssetCtxs(ctx, identity, mc, this.superAdmin, this.aclClient);
 
     // 并发对每个 ctx search L1
     const groups = await Promise.all(
-      authorizedCtxs.map(async (c) => {
+      ctxs.map(async (c) => {
         const items = await this.client.searchL1ForCtx(
           { teamId: c.teamId, userId: c.userId, agentId: c.agentId, agentName: c.agentName },
           query,
@@ -132,7 +118,7 @@ export class TdaiL1RecallInjector implements InjectionHook {
         metadata: {
           source: this.id,
           count: merged.length,
-          sources_searched: authorizedCtxs.map((c) => c.agentId),
+          sources_searched: ctxs.map((c) => c.agentId),
           injection_cap: this.globalTopK,
           injected_count: merged.length,
         },

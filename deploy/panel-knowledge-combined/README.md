@@ -216,6 +216,78 @@ docker run -d --name memory-hub \
 
 ---
 
+## Railway：单域名 Panel + KS
+
+`deploy/railway-hub/` 是官方镜像的无依赖薄包装，不重新安装或编译 Panel / KS。基镜像固定为 `agentmemory/memory-hub:1.0.3-beta.1@sha256:53a3285b6444628384fc0b9a1b5da66558daddbed8aba880ee66d390764b7c6a`。Node 入口启动镜像原有 `/usr/local/bin/start-combined.sh`，保留 Panel、KS 和知识数据目录；请求和响应以原生 HTTP 流转发，不整包缓存。
+
+### Railway 服务设置
+
+| 设置 | 值 |
+| --- | --- |
+| Source rootDirectory | `/deploy/railway-hub` |
+| Builder / Dockerfile | Dockerfile；构建上下文为该目录，文件名 `Dockerfile` |
+| startCommand | 留空使用镜像 CMD；若须显式设置，填 `node /app/railway-hub/entry.mjs` |
+| 公网域名 targetPort / `PORT` | `8080`；只给入口分配公网域名，不公开 `8125` / `8424` |
+| Healthcheck | `/health`，启动等待建议 `180` 秒 |
+| Volume | `/data`，覆盖 `/data/knowledge`；已有卷若挂载 `/data/knowledge` 则原样保留，不迁移历史数据 |
+
+同一域名 `https://<hub域名>` 的路由如下：
+
+| 路径 | 实际处理服务 |
+| --- | --- |
+| `/`、`/api/v1/*`、其它非 KS 路径 | 原 Panel `127.0.0.1:8125`，保留其 UI / API 鉴权 |
+| `/v3`、`/v3/*` | 原 KS `127.0.0.1:8424`，不进入 Panel SPA catch-all |
+| `/docs`、`/docs/*`、`/openapi.json` | 原 KS Swagger / 文档资源（`openapi.json` 的上游内容实际为 YAML） |
+| `/health` | 每次并行请求两个真实后端的 `/health`，均返回 `200` 才返回 `200`；否则 `503` |
+
+入口收到 `SIGTERM` / `SIGINT` 会关闭监听并通知原 launcher 所在整个进程组；launcher 意外退出则入口非零退出。最多等待 10 秒后终止遗留子进程和连接，避免只杀掉管道中的 `tee` 而留下 Panel / KS。
+
+### 环境变量与鉴权边界
+
+下列密钥仅在 Railway Variables 中设置或引用，勿提交进镜像、源码或命令行参数。包装层启动时要求 KS 校验凭据与 Panel 调用凭据非空且相同，公网令牌与其不同。
+
+| 环境变量 | Railway 配置 |
+| --- | --- |
+| `PORT` / `PANEL_PORT` / `KNOWLEDGE_PORT` | `8080` / `8125` / `8424`，三者不能相同 |
+| `KNOWLEDGE_SERVICE_KEY` | 独立随机长串，KS 写入和管理端点校验使用 |
+| `KNOWLEDGE_AUTH_TOKEN` | 与 `KNOWLEDGE_SERVICE_KEY` 相同；可用同服务变量引用 `${{KNOWLEDGE_SERVICE_KEY}}`，由 Panel 调用内部 KS 时使用 |
+| `HUB_PUBLIC_TOKEN` | 另一独立随机长串，只控制公网 KS 入口；不设置时 `/v3`、`/docs` 和文档资源全部返回 `503`，绝不匿名转发 |
+| `KNOWLEDGE_PUBLIC_BASE_URL` | `https://<hub域名>/v3`，必须含 `/v3`，供外部工具调用；调用方必须支持下述公网令牌 |
+| `REMOTE_INSTANCE_URL` | `http://<Kernel Railway私网域名>:8420`，Panel 后端的 Kernel 地址，不是 MemoryProxy 的客户端入口 |
+| `REMOTE_INSTANCE_KEY` | 该 Kernel 实例的网关 / 管理凭据，通过 Railway secret 引用提供 |
+| `REMOTE_INSTANCE_ID` / `REMOTE_INSTANCE_NAME` | 实际实例 ID / 显示名；ID 与工具请求的 `x-tdai-service-id` 一致 |
+| `REMOTE_INSTANCE_PROXY_URL` | `https://<MemoryProxy公网域名>`，仅供 Panel 显示未来客户端接入地址，不改变后端 Kernel 转发 |
+| `KNOWLEDGE_DATA_DIR` / `KNOWLEDGE_DB_PATH` | 保持 `/data/knowledge` / `/data/knowledge/knowledge.db`，落在持久卷内 |
+| `TMC_CALLBACK_URL` | 保持 `http://127.0.0.1:8125`；不经过公网令牌门禁 |
+| `API_PREFIX` | 不设置或 `/v3`，其它值会拒绝启动 |
+
+若挂载了 `/app/panel/config/metadata-instances.json`，原 launcher 会优先使用它，忽略 `REMOTE_INSTANCE_*` 生成配置；应在每个实例里填真实 `gateway_endpoint`、`api_key`、`proxy_endpoint`。不挂载时由原 launcher 根据上述环境变量生成单实例文件，不要把凭据写入 Dockerfile。
+
+LLM 可沿用既有配置；直连自有端点时设置 `LLM_MODE=custom`、`LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`、配套的 `LLM_PROTOCOL`，以及 `KNOWLEDGE_LLM_BINDING_SYNC=0`。不新增或启用 Langfuse、ClickHouse、Kafka。`LLM_MODE=proxy` 则仍需真实可达的 `KNOWLEDGE_LLM_PROXY_BASE_URL` 并由原 Panel 同步绑定。
+
+固定镜像的 KS **不是面向用户身份的独立鉴权服务**：`KNOWLEDGE_SERVICE_KEY` 非空时，写 / 管理接口（包括全部 `/v3/internal/llm-binding/*`）要求 `Authorization: Bearer <service key>`，但 tools、wiki / code-graph 等只读白名单仍允许匿名调用；`x-tdai-service-id` 是调用方自报的实例路由键，不证明用户或团队成员身份。因此包装层对全部公网 KS / 文档路径额外检查 `HUB_PUBLIC_TOKEN`：
+
+- 只读客户端发送 `Authorization: Bearer <HUB_PUBLIC_TOKEN>` 或 `x-hub-token: <HUB_PUBLIC_TOKEN>`。
+- 需要 KS 写 / 管理权限时，必须同时发送 `x-hub-token: <HUB_PUBLIC_TOKEN>` 与 `Authorization: Bearer <KNOWLEDGE_SERVICE_KEY>`。入口不注入、替换或回显上游服务密钥，公网令牌不能代替 KS 管理凭据。
+- Panel 经回环地址调用 KS，不经过公网入口，仍使用原 `KNOWLEDGE_AUTH_TOKEN`。原 Panel 用户鉴权和 Kernel 权限检查不变。
+- 公网令牌是服务级门禁，不是普通用户的跨团队授权机制，不能发给不可信客户端；任意客户端应优先通过有用户权限检查的 MemoryProxy / Panel 访问。若工具调用方不支持附带公网令牌，应仅让其走受信任私网 `http://<hub私网域名>:8424/v3`，并相应设置资源发布地址，不能为了兼容关闭门禁。
+- `/docs` 及其 `/openapi.json` 请求都需要门禁头；浏览器直接打开不会自动携带 Bearer，可使用能注入请求头的客户端。令牌不接受 URL 查询参数，也不写入页面或 Cookie。是否采用上游级用户认证须另行决定，不能把现有 KS 的匿名读行为当作身份隔离。
+
+### 真实边界 smoke（不启动服务、不写数据）
+
+使用 Node 22+，对已经运行的 Hub 执行；密钥从已安全注入的环境读取，不在命令中写真实值：
+
+```bash
+HUB_BASE_URL=https://<hub域名> node deploy/railway-hub/smoke.mjs
+```
+
+运行端设置 `HUB_PUBLIC_TOKEN` 后会检查 Panel HTML / API、双后端健康、未鉴权的公网 KS / 文档拒绝、真实 KS tools 信封、Swagger / OpenAPI，以及无上游 key 时 internal 接口必须 `401`。另设置 `KNOWLEDGE_SERVICE_KEY` 可增加有凭据的只读 binding/list 检查；不会打印响应数据或密钥。若目标部署未设置公网令牌，运行端也应不设置它，脚本改为检查整个公网 KS 面均 `503`。
+
+对已知有一个真实后端不可用的隔离测试部署，可运行 `HUB_EXPECT_UNHEALTHY=1 HUB_BASE_URL=<测试入口> node deploy/railway-hub/smoke.mjs`，只验证 health 必须 `503`；不要为该检查停止本机或生产后端。本配方不启动 / 停止任何本机 TencentDB 服务，不修改本机或 Mac 客户端配置。
+
+---
+
+
 ## 常见问题
 
 ### Q: 容器内访问宿主机服务？

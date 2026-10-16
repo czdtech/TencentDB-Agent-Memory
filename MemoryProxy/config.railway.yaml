@@ -75,29 +75,86 @@ sessionInit:
   maxRetries: 3
   injectAgentContext: true
   injectTaskContext: true
-  defaultTaskId: task-qaykuxtwee
+  defaultTaskId: task-awshfblu7q
+  # 每条上游路由的默认身份。客户端显式携带 x-team-id / x-agent-id 时以 header 为准
+  # （headerAutoSelect），此处仅作为未带头时的预设。模型路由不改变记忆身份：
+  # 同一工位换模型仍落在同一个 agent 上。
   routeIdentities:
+    # ── 个人工位（team-awpqj5bfn6）──
     omp:
-      team_id: team-9wnplsilcp
-      agent_id: agt-9wnq5fhdpt
+      team_id: team-awpqj5bfn6
+      agent_id: agt-awrde599w5
+      task_id: task-awshfblu7q
     claude-code:
-      team_id: team-9wnqh5zsy3
-      agent_id: agt-9wnqqh0a1b
+      team_id: team-awpqj5bfn6
+      agent_id: agt-awrdcsatvm
+      task_id: task-awshfblu7q
     codex:
-      team_id: team-9wnqh5zsy3
-      agent_id: agt-9wnqqh0a1b
+      team_id: team-awpqj5bfn6
+      agent_id: agt-awre8n2eew
+      task_id: task-awshfblu7q
+    cursor:
+      team_id: team-awpqj5bfn6
+      agent_id: agt-awre4n162g
+      task_id: task-awshfblu7q
+    genericagent:
+      team_id: team-awpqj5bfn6
+      agent_id: agt-awreze0em1
+      task_id: task-awshfblu7q
+    genericagent-mac:
+      team_id: team-awpqj5bfn6
+      agent_id: agt-awreze0em1
+      task_id: task-awshfblu7q
+    newapi-tencent-cc:
+      team_id: team-awpqj5bfn6
+      agent_id: agt-awrdcsatvm
+      task_id: task-awshfblu7q
+    newapi-tencent-pro:
+      team_id: team-awpqj5bfn6
+      agent_id: agt-awre8n2eew
+      task_id: task-awshfblu7q
+    newapi-tencent-pro-low:
+      team_id: team-awpqj5bfn6
+      agent_id: agt-awre8n2eew
+      task_id: task-awshfblu7q
+    newapi-tencent-ds:
+      team_id: team-awpqj5bfn6
+      agent_id: agt-awrde599w5
+      task_id: task-awshfblu7q
+    newapi-tencent-glm:
+      team_id: team-awpqj5bfn6
+      agent_id: agt-awrde599w5
+      task_id: task-awshfblu7q
+    newapi-tencent-kimi:
+      team_id: team-awpqj5bfn6
+      agent_id: agt-awrde599w5
+      task_id: task-awshfblu7q
+    newapi-tencent-grok:
+      team_id: team-awpqj5bfn6
+      agent_id: agt-awrde599w5
+      task_id: task-awshfblu7q
+    cliproxyapi-tencent-gemini:
+      team_id: team-awpqj5bfn6
+      agent_id: agt-awrde599w5
+      task_id: task-awshfblu7q
+    # ── 评测团队（team-9wnplsilcp）──
     genericagent-win:
       team_id: team-9wnplsilcp
+      agent_id: agt-awrfkdpcf9
+      task_id: task-awshby5o2a
+    newapi-tencent-eval:
+      team_id: team-9wnplsilcp
       agent_id: agt-9wnq5fhdpt
+      task_id: task-awshby5o2a
+    # ── 开发三席（team-9wnqh5zsy3）──
     newapi-tencent-cc-qayk:
       team_id: team-9wnqh5zsy3
       agent_id: agt-9wnqqh0a1b
+      task_id: task-awsh84s90l
     newapi-tencent-pro-qayk:
       team_id: team-9wnqh5zsy3
-      agent_id: agt-9wnqqh0a1b
-    newapi-tencent-ds:
-      team_id: team-9wnplsilcp
-      agent_id: agt-9wnq5fhdpt
+      agent_id: agt-awrgjid5tc
+      task_id: task-awsh84s90l
   headerAutoSelect:
     enabled: true
     teamHeader: x-team-id
@@ -137,15 +194,59 @@ superAdmin:
   enabled: true
   team_id: "team-9wnq4ojn52"
   apiKey: "${TDAI_PROXY_ADMIN_API_KEY}"
+  # 显式来源清单：只有 team-9wnq4ojn52 上的身份会额外看到这些来源；其他 team 的
+  # 身份无论此表内容都只看自己 + 本 team 授权绑定。这里的条目同时决定
+  # 「自动注入（fixed asset）」与「显式读取（memory-bridge）」的可见范围 ——
+  # 二者共用同一份判定，避免出现注入与读取范围不一致。
+  # 跨来源只读：超管可读这些来源，但对其发起的写/更新/删除会被拒绝。
   sources:
+    # ── 个人助理 ──
+    - team_id: team-awpqj5bfn6
+      user_id: usr-9wnp5led1n
+      agent_id: agt-awrde599w5
+      name: personal/omp
+    - team_id: team-awpqj5bfn6
+      user_id: usr-9wnp5led1n
+      agent_id: agt-awrdcsatvm
+      name: personal/claude-code
+    - team_id: team-awpqj5bfn6
+      user_id: usr-9wnp5led1n
+      agent_id: agt-awre8n2eew
+      name: personal/codex
+    - team_id: team-awpqj5bfn6
+      user_id: usr-9wnp5led1n
+      agent_id: agt-awreze0em1
+      name: personal/genericagent
+    - team_id: team-awpqj5bfn6
+      user_id: usr-9wnp5led1n
+      agent_id: agt-awre4n162g
+      name: personal/cursor
+    # ── 评测团队 ──
     - team_id: team-9wnplsilcp
       user_id: usr-9wnp5led1n
       agent_id: agt-9wnq5fhdpt
-      name: team-a
+      name: evaluation/omp-eval
+    - team_id: team-9wnplsilcp
+      user_id: usr-9wnp5led1n
+      agent_id: agt-awrfkdpcf9
+      name: evaluation/genericagent-win
+    - team_id: team-9wnplsilcp
+      user_id: usr-9wnp5led1n
+      agent_id: agt-awrfr5frbm
+      name: evaluation/coordinator
+    # ── 开发三席 ──
     - team_id: team-9wnqh5zsy3
       user_id: usr-9wnp5led1n
       agent_id: agt-9wnqqh0a1b
-      name: team-b
+      name: dev/lead
+    - team_id: team-9wnqh5zsy3
+      user_id: usr-9wnp5led1n
+      agent_id: agt-awrgjid5tc
+      name: dev/reviewer
+    - team_id: team-9wnqh5zsy3
+      user_id: usr-9wnp5led1n
+      agent_id: agt-awrgd0ncgb
+      name: dev/writer
 admin:
   apiKey: "${TDAI_PROXY_ADMIN_API_KEY}"
   # 运维旁路代表的内核 user_key（内核 Layer3 校验用）。留空会让 fixed-asset 等

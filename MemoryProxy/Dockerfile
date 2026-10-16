@@ -29,9 +29,7 @@ FROM node:22-slim AS deps-builder
 
 # Native build toolchain（better-sqlite3 / node-pty 需要编译）
 # 使用 BuildKit cache mount 缓存 apt 包，避免重复下载
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 \
         make \
         g++ \
@@ -49,8 +47,7 @@ COPY package.json package-lock.json ./
 
 # 安装全部依赖（保留 dev：tsx 运行时需要；保留 optional：sqlite/cos/cost-guard）。
 # 使用 BuildKit npm cache mount 大幅加速重复构建。
-RUN --mount=type=cache,id=proxy-npm-cache,target=/root/.npm \
-    npm install \
+RUN npm install \
         --no-audit \
         --no-fund
 
@@ -65,9 +62,7 @@ FROM node:22-slim AS runtime
 # 使用 Debian 官方 apt 源（deb.debian.org）。如构建缓慢，可自行替换为镜像源。
 
 # Runtime essentials only（curl 供 HEALTHCHECK；tini 负责信号处理）
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         tini \
         ca-certificates
@@ -79,6 +74,7 @@ RUN groupadd -r app && useradd -r -g app -u 10001 -m app
 
 # 从 builder 拷贝整个 /app（含 node_modules 里指向 packages/cost-guard 的 file: 软链）
 COPY --from=deps-builder /app /app
+COPY config.railway.yaml /app/config.railway.yaml
 
 # 数据 / 日志目录（可作为 K8s PVC 挂载）
 RUN mkdir -p /data/tdai-memory-proxy /data/config /app/logs && \
@@ -101,8 +97,10 @@ HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=15s \
     CMD curl -fsS http://127.0.0.1:8096/health || exit 1
 
 # tini 作 PID 1，使 SIGTERM/SIGKILL 干净传给 Node 及其子进程，并回收僵尸进程。
-# tsx 是运行时依赖，可直接执行 TypeScript。
-ENTRYPOINT ["/usr/bin/tini", "--", "node", "--import", "tsx/esm", "src/index.ts"]
+# Keep ENTRYPOINT at tini only: Railway custom start commands must execute as
+# commands (for example, the runtime config-writing shell command), not become
+# arguments to an already-started Node process.
+ENTRYPOINT ["/usr/bin/tini", "--"]
 
-# 默认配置文件路径（可被 docker run 追加参数覆盖）
-CMD ["--config", "/data/config.yaml"]
+# 默认命令加载镜像内的 Railway 配置；敏感/环境特定值由 env 覆盖。
+CMD ["node", "--import", "tsx/esm", "src/index.ts", "--config", "/app/config.railway.yaml"]

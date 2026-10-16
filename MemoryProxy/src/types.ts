@@ -297,6 +297,19 @@ export interface SessionInitConfig {
     onMismatch: "form" | "bypass";
   };
 }
+export interface MemorySuperAdminSource {
+  team_id: string;
+  user_id: string;
+  agent_id: string;
+  name?: string;
+}
+
+export interface MemorySuperAdminConfig {
+  enabled: boolean;
+  team_id: string;
+  apiKey: string;
+  sources: MemorySuperAdminSource[];
+}
 
 export interface TdaiConfig {
   enabled: boolean;
@@ -483,6 +496,8 @@ export interface ProxyConfig {
   injection: InjectionConfig;
   extraction: ExtractionConfig;
   sessionInit: SessionInitConfig;
+  superAdmin: MemorySuperAdminConfig;
+
   tdai: TdaiConfig;
   coreSkill: CoreSkillConfig;
   knowledge: KnowledgeConfig;
@@ -510,6 +525,14 @@ export interface ProxyConfig {
    */
   admin: {
     apiKey: string;
+    /**
+     * 运维旁路（admin token 直连）时代表调用方的内核 user_key（`x-tdai-user-key`）。
+     * 用于需要以真实用户身份向内核发起的调用（如 L3 fixed-asset 聚合）。
+     * 留空则退回用 admin token 充当，内核会以 `invalid_user_key` 拒绝。
+     *
+     * env 覆盖：`TDAI_ADMIN_USER_KEY`。
+     */
+    userKey: string;
   };
   /**
    * `mem:` 特殊命令配置。
@@ -665,6 +688,12 @@ export interface AuthConfig {
   enabled: boolean;
   /** Auth service base URL (e.g. http://kernel.example.com:8420). */
   url: string;
+  /**
+   * Kernel gateway service token, sent as `Authorization: Bearer <token>`.
+   * Required when the kernel runs with `TDAI_GATEWAY_API_KEY` set — the
+   * gateway rejects unauthenticated `/v3/meta/*` calls with 401.
+   */
+  token: string;
   /** Request timeout in ms. Default: 5000. */
   timeoutMs: number;
 }
@@ -903,6 +932,12 @@ export interface RawYamlConfig {
       onMismatch?: "form" | "bypass";
     };
   };
+  superAdmin?: {
+    enabled?: boolean;
+    team_id?: string;
+    apiKey?: string;
+    sources?: MemorySuperAdminSource[];
+  };
   tdai?: {
     enabled?: boolean;
     endpoint?: string;
@@ -925,11 +960,14 @@ export interface RawYamlConfig {
   auth?: {
     enabled?: boolean;
     url?: string;
+    /** Kernel gateway service token (Bearer). */
+    token?: string;
     timeoutMs?: number;
   };
   systemUsers?: Partial<SystemUserEntry>[];
   admin?: {
     apiKey?: string;
+    userKey?: string;
   };
   /**
    * mem: 命令族配置（含 create-task / update-task 的 LLM 草稿生成器）。

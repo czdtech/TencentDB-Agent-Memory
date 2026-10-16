@@ -1,0 +1,153 @@
+server:
+  host: 0.0.0.0
+  port: 8096
+  forwardTimeoutMs: 600000
+upstream:
+  url: https://new-api-production-e8f1.up.railway.app/v1
+  apiKey: "${PROXY_UPSTREAM_API_KEY}"
+  agents:
+    claude-code:
+      url: https://new-api-production-e8f1.up.railway.app/v1
+      apiKey: "${PROXY_AGENT_KEY_CC}"
+    codex:
+      url: https://new-api-production-e8f1.up.railway.app/v1
+      apiKey: "${PROXY_UPSTREAM_API_KEY}"
+    newapi-tencent-cc:
+      url: https://new-api-production-e8f1.up.railway.app/v1
+      apiKey: "${PROXY_AGENT_KEY_CC}"
+    newapi-tencent-pro:
+      url: https://new-api-production-e8f1.up.railway.app/v1
+      apiKey: "${PROXY_UPSTREAM_API_KEY}"
+    newapi-tencent-pro-low:
+      url: https://new-api-production-e8f1.up.railway.app/v1
+      apiKey: "${PROXY_UPSTREAM_API_KEY}"
+    newapi-tencent-ds:
+      url: https://new-api-production-e8f1.up.railway.app/v1
+      apiKey: "${PROXY_AGENT_KEY_DS}"
+    newapi-tencent-kimi:
+      url: https://new-api-production-e8f1.up.railway.app/v1
+      apiKey: "${PROXY_AGENT_KEY_KIMI}"
+    newapi-tencent-glm:
+      url: https://new-api-production-e8f1.up.railway.app/v1
+      apiKey: "${PROXY_AGENT_KEY_GLM}"
+    newapi-tencent-grok:
+      url: https://new-api-production-e8f1.up.railway.app/v1
+      apiKey: "${PROXY_AGENT_KEY_GROK}"
+    cliproxyapi-tencent-gemini:
+      url: https://cliproxyapi-production-8e60.up.railway.app/v1
+      apiKey: "${PROXY_AGENT_KEY_GEMINI}"
+    newapi-tencent-cc-qayk:
+      url: https://new-api-production-e8f1.up.railway.app/v1
+      apiKey: "${PROXY_AGENT_KEY_CC}"
+    newapi-tencent-pro-qayk:
+      url: https://new-api-production-e8f1.up.railway.app/v1
+      apiKey: "${PROXY_UPSTREAM_API_KEY}"
+log:
+  file: /data/tdai-memory-proxy/logs
+  level: info
+  backend: console
+tdai:
+  enabled: true
+  endpoint: http://memory-core.railway.internal:8420
+  apiKey: "${TDAI_CORE_USER_KEY}"
+  serviceId: default
+  memory:
+    enabled: true
+    inject: true
+    writeL0: true
+    recallL1: true
+    injectL2L3: true
+skill:
+  endpoint: http://memory-core.railway.internal:8420
+  serviceToken: "${TDAI_CORE_USER_KEY}"
+knowledge:
+  enabled: true
+  endpoint: http://memory-core.railway.internal:8420
+  serviceToken: "${TDAI_CORE_USER_KEY}"
+  serviceId: default
+  timeoutMs: 5000
+auth:
+  enabled: true
+  url: http://memory-core.railway.internal:8420
+  timeoutMs: 5000
+sessionInit:
+  enabled: true
+  maxRetries: 3
+  injectAgentContext: true
+  injectTaskContext: true
+  defaultTaskId: task-qaykuxtwee
+  routeIdentities:
+    omp:
+      team_id: team-9wnplsilcp
+      agent_id: agt-9wnq5fhdpt
+    claude-code:
+      team_id: team-9wnqh5zsy3
+      agent_id: agt-9wnqqh0a1b
+    codex:
+      team_id: team-9wnqh5zsy3
+      agent_id: agt-9wnqqh0a1b
+    genericagent-win:
+      team_id: team-9wnplsilcp
+      agent_id: agt-9wnq5fhdpt
+    newapi-tencent-cc-qayk:
+      team_id: team-9wnqh5zsy3
+      agent_id: agt-9wnqqh0a1b
+    newapi-tencent-pro-qayk:
+      team_id: team-9wnqh5zsy3
+      agent_id: agt-9wnqqh0a1b
+    newapi-tencent-ds:
+      team_id: team-9wnplsilcp
+      agent_id: agt-9wnq5fhdpt
+  headerAutoSelect:
+    enabled: true
+    teamHeader: x-team-id
+    agentHeader: x-agent-id
+    taskHeader: x-task-id
+    onMismatch: bypass
+injection:
+  enabled: true
+  injectors:
+  - skill
+  - knowledge
+  - tdai-memory
+extraction:
+  enabled: true
+  extractors:
+  - skill
+  - tdai-memory
+redis:
+  enabled: false
+storage:
+  enabled: true
+  backend: sqlite
+  ttlDays: 7
+  sqlite:
+    dbPath: /data/tdai-memory-proxy/proxy.db
+  fs:
+    fsRoot: /data/tdai-memory-proxy/fs
+opik:
+  enabled: false
+langfuse:
+  enabled: false
+clickhouse:
+  enabled: false
+creditReport:
+  enabled: false
+superAdmin:
+  enabled: true
+  team_id: "team-9wnq4ojn52"
+  apiKey: "${TDAI_PROXY_ADMIN_API_KEY}"
+  sources:
+    - team_id: team-9wnplsilcp
+      user_id: usr-9wnp5led1n
+      agent_id: agt-9wnq5fhdpt
+      name: team-a
+    - team_id: team-9wnqh5zsy3
+      user_id: usr-9wnp5led1n
+      agent_id: agt-9wnqqh0a1b
+      name: team-b
+admin:
+  apiKey: "${TDAI_PROXY_ADMIN_API_KEY}"
+  # 运维旁路代表的内核 user_key（内核 Layer3 校验用）。留空会让 fixed-asset 等
+  # 调用以 admin token 充当 user_key 被内核拒绝（401 invalid_user_key）。
+  userKey: "${TDAI_CORE_USER_KEY}"

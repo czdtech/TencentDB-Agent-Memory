@@ -44,14 +44,15 @@ const TAG = "[memory-bridge]";
  *
  * 写操作（write / rm / add / update / delete）一律不在 allowlist 里；写入走主链路。
  */
-const ALLOWED_SUBPATHS = new Set<string>([
-  "atomic/search",        // L1 原子记忆 hybrid search
-  "atomic/query",         // L1 按 type/时间/分页
-  "conversation/search",  // L0 对话 hybrid search
-  "conversation/query",   // L0 按 session 取历史
-  "scenario/ls",          // L2 场景列表（path 索引）
-  "scenario/read",        // L2 按 path 读全文
-]);
+const ALLOWED_SUBPATHS: Record<string, true> = {
+  "atomic/search": true,
+  "atomic/query": true,
+  "conversation/add": true,
+  "conversation/search": true,
+  "conversation/query": true,
+  "scenario/ls": true,
+  "scenario/read": true,
+};
 
 interface SessionIdFields {
   user_id: string;
@@ -195,6 +196,21 @@ function selfCtx(ids: SessionIdFields): FixedAssetCtx {
 }
 
 async function resolveMemoryCtxs(config: ProxyConfig, ids: SessionIdFields, sessionKey: string): Promise<FixedAssetCtx[]> {
+  const superAdmin = config.superAdmin;
+  if (superAdmin.enabled && ids.team_id === superAdmin.team_id) {
+    const self = selfCtx(ids);
+    const imported = superAdmin.sources
+      .filter((source) => !(source.team_id === ids.team_id && source.agent_id === ids.agent_id))
+      .map((source) => ({
+        teamId: source.team_id,
+        userId: source.user_id,
+        agentId: source.agent_id,
+        agentName: source.name ?? source.agent_id,
+        isSelf: false,
+      }));
+    return [self, ...imported];
+  }
+
   if (!ids.user_key) return [selfCtx(ids)];
   try {
     const serviceId = ids.space_id || config.tdai?.serviceId || config.coreSkill.serviceId;
@@ -228,6 +244,7 @@ async function resolveMemoryCtxs(config: ProxyConfig, ids: SessionIdFields, sess
   }
 }
 
+
 function selectTargetCtx(ctxs: FixedAssetCtx[], requestedAgentId: unknown): FixedAssetCtx | null {
   if (typeof requestedAgentId === "string" && requestedAgentId.trim()) {
     const found = ctxs.find((ctx) => ctx.agentId === requestedAgentId.trim());
@@ -241,6 +258,8 @@ async function filterAuthorizedMemoryCtxs(
   ids: SessionIdFields,
   ctxs: FixedAssetCtx[],
 ): Promise<FixedAssetCtx[]> {
+  if (config.superAdmin.enabled && ids.team_id === config.superAdmin.team_id) return ctxs;
+
   const userKey = ids.user_key;
   if (!userKey) return ctxs.filter((target) => target.isSelf);
   const client = new TdaiClient({
@@ -304,7 +323,7 @@ export function createMemoryBridgeHandler(
       });
       return envelope(40401, `${TAG} unknown path ${path}`, 404);
     }
-    if (!ALLOWED_SUBPATHS.has(sub)) {
+    if (!ALLOWED_SUBPATHS[sub]) {
       emitBridgeRejectTelemetry({
         sessionKey: "", bridgeSource: "memory-bridge",
         rejectReason: "subpath_forbidden", httpStatus: 403,
@@ -350,6 +369,26 @@ export function createMemoryBridgeHandler(
     if (!ids && bindingRepo && spaceId) {
       console.log(`${TAG} session=${sessionKey} L1 miss → L2 binding lookup (space=${spaceId})`);
       ids = await loadSessionIdsL2(bindingRepo, spaceId, sessionKey);
+    }
+    if (!ids) {
+      const authHeader = (c.req.header("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+      const adminKey = (config.admin?.apiKey || config.superAdmin?.apiKey || "").trim();
+      const headerTeam = (c.req.header("x-tdai-team-id") ?? "").trim();
+      const headerUser = (c.req.header("x-tdai-user-id") ?? "").trim();
+      const headerAgent = (c.req.header("x-tdai-agent-id") ?? "").trim();
+      if (adminKey && authHeader && authHeader === adminKey && headerTeam && headerUser && headerAgent) {
+        ids = {
+          team_id: headerTeam,
+          user_id: headerUser,
+          agent_id: headerAgent,
+          session_id: sessionKey,
+          space_id: spaceId || "default",
+          // 旁路身份需要真实内核 user_key 才能通过 Layer3；admin token 不是
+          // 合法 user_key，直接沿用会让 fixed-asset 等调用 401 并退化为 self-only。
+          user_key: config.admin?.userKey || authHeader,
+          composite_key: `admin:${sessionKey}`,
+        };
+      }
     }
     if (!ids) {
       emitBridgeRejectTelemetry({
@@ -417,8 +456,8 @@ export function createMemoryBridgeHandler(
       ids,
       await resolveMemoryCtxs(config, ids, sessionKey),
     );
-    // task_id 优先级：caller 显式传 > session 注入。session_id 保持"仅 caller 显式传"，
-    // 因为 search 类希望默认跨 session（agent 维度）；task_id 属于身份维度，仍应强制。
+    // Search stays cross-session: core treats session_id as a session_key
+    // filter, so only forward it when the caller explicitly supplied one.
     const effectiveTaskId = modelTaskId ?? ids.task_id;
     const makeOutbound = (target: FixedAssetCtx): Record<string, unknown> => ({
       ...inboundBody,

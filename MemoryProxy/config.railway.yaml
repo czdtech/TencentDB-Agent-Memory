@@ -42,6 +42,10 @@ upstream:
     newapi-tencent-pro-qayk:
       url: https://new-api-production-e8f1.up.railway.app/v1
       apiKey: "${PROXY_UPSTREAM_API_KEY}"
+    # 超管（全局记忆总管）走 DeepSeek 官方，不经中转站
+    dsh:
+      url: https://api.deepseek.com/v1
+      apiKey: "${PROXY_AGENT_KEY_DSH}"
 log:
   file: /data/tdai-memory-proxy/logs
   level: info
@@ -155,6 +159,11 @@ sessionInit:
       team_id: team-9wnqh5zsy3
       agent_id: agt-awrgjid5tc
       task_id: task-awsh84s90l
+    # ── 全局记忆总管（team-9wnq4ojn52）──
+    # 不带 task_id：跨团队检索需要覆盖各来源的全部记忆
+    dsh:
+      team_id: team-9wnq4ojn52
+      agent_id: agt-9wnqlax2mz
   headerAutoSelect:
     enabled: true
     teamHeader: x-team-id

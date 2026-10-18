@@ -15,6 +15,7 @@ import { createInstanceDestroyHandler } from "./routes/instance-destroy.js";
 import { createRateLimitHandlers } from "./routes/rate-limits.js";
 import { createModelAliasHandler } from "./routes/model-aliases.js";
 import { hasAnalyseMarker, hasCostGuardMarker } from "./routes/whitelist.js";
+import { requireAdmin } from "./routes/admin-auth.js";
 import { tryActivateStorage, tryActivateRedis } from "./injection/index.js";
 import { getEffectiveBackend } from "./storage/factory.js";
 import type { ProxyConfig } from "./types.js";
@@ -143,28 +144,31 @@ export function createApp(config: ProxyConfig): Hono {
   // ── Ops endpoint（在 catch-all `POST /*` 之前注册） ───────────────────────
   // /v3/instance/proxy-destroy — shark 销毁实例时清理 proxy 侧 COS 缓存 +
   // kernel-sts pool。契约字段跟 core `/v3/instance/destroy` 对齐，路径用
-  // `proxy-destroy` 动作与 core 区分。鉴权走 config.admin.apiKey（空则公开）。
+  // `proxy-destroy` 动作与 core 区分。鉴权走 config.admin.apiKey。
+  //
+  // 这五条都会改全局状态或任意会话状态，而网关域名是公网可达的，所以统一走
+  // requireAdmin：带 Bearer 且校验通过才放行；admin.apiKey 没配时返回 503 关掉
+  // 端点，而不是像 checkAdminAuth 那样把"没配 key"当成"允许访问"。
+  const adminApiKey = config.admin?.apiKey;
   const instanceDestroyHandler = createInstanceDestroyHandler(config);
-  app.post("/v3/instance/proxy-destroy", (c) => instanceDestroyHandler(c));
+  app.post("/v3/instance/proxy-destroy", requireAdmin(adminApiKey, (c) => instanceDestroyHandler(c)));
 
   const rateLimitHandlers = createRateLimitHandlers(config);
-  app.get("/v3/admin/rate-limits", rateLimitHandlers.get);
-  app.put("/v3/admin/rate-limits", rateLimitHandlers.put);
-  app.delete("/v3/admin/rate-limits", rateLimitHandlers.delete);
+  app.get("/v3/admin/rate-limits", requireAdmin(adminApiKey, rateLimitHandlers.get));
+  app.put("/v3/admin/rate-limits", requireAdmin(adminApiKey, rateLimitHandlers.put));
+  app.delete("/v3/admin/rate-limits", requireAdmin(adminApiKey, rateLimitHandlers.delete));
 
-  app.get("/v3/admin/model-aliases", createModelAliasHandler(config));
+  app.get("/v3/admin/model-aliases", requireAdmin(adminApiKey, createModelAliasHandler(config)));
 
   // ── Session management endpoints (mem: command 底层接口, 面板前端可复用) ──
-  app.post("/v3/session/refresh-cache", (c) => {
-    return import("./routes/session-refresh.js").then(({ createSessionRefreshHandler }) =>
+  app.post("/v3/session/refresh-cache", requireAdmin(adminApiKey, (c) =>
+    import("./routes/session-refresh.js").then(({ createSessionRefreshHandler }) =>
       createSessionRefreshHandler(config)(c),
-    );
-  });
-  app.post("/v3/session/force-archive-skill", (c) => {
-    return import("./routes/session-force-archive.js").then(({ createSessionForceArchiveHandler }) =>
+    )));
+  app.post("/v3/session/force-archive-skill", requireAdmin(adminApiKey, (c) =>
+    import("./routes/session-force-archive.js").then(({ createSessionForceArchiveHandler }) =>
       createSessionForceArchiveHandler(config)(c),
-    );
-  });
+    )));
 
   // ── Whitelisted primary endpoints ────────────────────────────────────────
   app.post("/v1/messages", (c) => handleAnthropicMessages(c, config));

@@ -97,15 +97,21 @@ sessionInit:
   # /v3/atomic/search 会按这个 task 过滤（召回被缩窄），
   # 而 task 详情和参与日志又因为 !==defaultTaskId 的分支被跳过 —— 语义正好拧着。
   defaultTaskId: task-identity-skip
-  # 身份来源只剩一条：DSH（Mac 上的幕僚长）发不出身份头，只能按路由预设。
-  # 其余客户端（OMP / Paseo Lead / Reviewer / opencode / tdam-bind 生成的项目配置）
-  # 都显式带 x-team-id / x-agent-id / x-task-id，不再由路由名决定归属 ——
-  # 换模型不改记忆归属，同一席位不同模型落同一个 agent。
+  # 两条路由预设，都是因为客户端发不出身份头：
+  #   dsh —— Mac 上的 DSH 没有自定义头的能力；
+  #   newapi-tencent-pro-qayk —— Paseo 的 codex runner 只往环境里塞
+  #   OPENAI_BASE_URL / OPENAI_API_KEY，没有地方写 x-team-id / x-agent-id。
+  # 其余客户端（OMP / Paseo Lead / opencode / tdam-bind 生成的项目配置）都显式带
+  # 身份头，不再由路由名决定归属 —— 换模型不改记忆归属，同一席位不同模型落同一个 agent。
   routeIdentities:
     dsh:
       team_id: team-eddlrpyso7
       agent_id: agt-eddr05j3ad
       # 不带 task_id：跨团队总管要覆盖各来源的全部记忆，带 task 会把召回缩窄
+    newapi-tencent-pro-qayk:
+      team_id: team-eddmd25qjy
+      agent_id: agt-eddwxy217t
+      # 同样不带 task_id：Reviewer 要在本席位的历史上宽召回
   headerAutoSelect:
     enabled: true
     teamHeader: x-team-id

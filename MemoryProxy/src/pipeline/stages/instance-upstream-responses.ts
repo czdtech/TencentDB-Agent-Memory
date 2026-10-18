@@ -20,7 +20,7 @@
  */
 
 import type { ProxyConfig } from "../../types.js";
-import { getInstanceUpstreamConfigs, resolveForAgent } from "../../instance-upstream-cache.js";
+import { getInstanceUpstreamConfigs, resolveForAgentWithLocal } from "../../instance-upstream-cache.js";
 import { joinUrl } from "../../guard-adapter.js";
 
 export interface InstanceUpstreamResponsesInput {
@@ -72,7 +72,7 @@ export async function stageInstanceUpstreamResponses(
 
   const resolution = forceOfficial
     ? { kind: "official" as const, row: null }
-    : resolveForAgent(instanceConfigs, agent);
+    : resolveForAgentWithLocal(instanceConfigs, agent, config.upstream.agents);
 
   if (resolution.kind === "blocked") {
     return {

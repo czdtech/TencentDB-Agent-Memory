@@ -5,6 +5,10 @@ server:
 upstream:
   url: https://new-api-production-e8f1.up.railway.app/v1
   apiKey: "${PROXY_UPSTREAM_API_KEY}"
+  # 这里的 name 只做一件事：按 URL 第一段选「上游 + 上游 key」。
+  # 记忆身份不在这张表上 —— 一律由客户端请求头 x-team-id / x-agent-id / x-task-id
+  # 决定（见 sessionInit.routeIdentities 的说明）。删掉某个条目会让该路由退回
+  # 全局上游与全局 key，对应客户端直接 401，所以宁可留着不用也别删。
   agents:
     claude-code:
       url: https://new-api-production-e8f1.up.railway.app/v1
@@ -42,10 +46,16 @@ upstream:
     newapi-tencent-pro-qayk:
       url: https://new-api-production-e8f1.up.railway.app/v1
       apiKey: "${PROXY_UPSTREAM_API_KEY}"
-    # 超管（全局记忆总管）走 DeepSeek 官方，不经中转站
-    # DSH 只用 Anthropic Messages 协议；DeepSeek 的 Messages 端点在 /anthropic 下
+    # 幕僚长（全局记忆总管）走 DeepSeek 官方，不经中转站。
+    # DSH 只会 Anthropic Messages 协议；DeepSeek 的 Messages 端点在 /anthropic 下。
     dsh:
       url: https://api.deepseek.com/anthropic/v1
+      apiKey: "${PROXY_AGENT_KEY_DSH}"
+    # 巡检验证员：opencode 走 OpenAI Chat Completions，直连 DeepSeek 官方
+    # /v1/chat/completions。模型名必须发 deepseek-chat —— DeepSeek 官方没有
+    # "flash" 这个 ID，别名表在 creditPricing 里，而计费是关的，别指望它兜。
+    opencode:
+      url: https://api.deepseek.com/v1
       apiKey: "${PROXY_AGENT_KEY_DSH}"
 log:
   file: /data/tdai-memory-proxy/logs
@@ -61,6 +71,8 @@ tdai:
     inject: true
     writeL0: true
     recallL1: true
+    # L2/L3 注入的真开关是这个。injection.injectors 那个列表管不到它，
+    # 之前误以为删列表就能关注入。
     injectL2L3: true
 skill:
   endpoint: http://memory-core.railway.internal:8420
@@ -80,99 +92,41 @@ sessionInit:
   maxRetries: 3
   injectAgentContext: true
   injectTaskContext: true
-  defaultTaskId: task-awshfblu7q
-  # 每条上游路由的默认身份。客户端显式携带 x-team-id / x-agent-id 时以 header 为准
-  # （headerAutoSelect），此处仅作为未带头时的预设。模型路由不改变记忆身份：
-  # 同一工位换模型仍落在同一个 agent 上。
+  # 这是团队级联里「暂时跳过」那一项的虚拟 ID，必须不是真实 task。
+  # 之前填的是真实 task-awshfblu7q：一旦被 auto-select 命中，
+  # /v3/atomic/search 会按这个 task 过滤（召回被缩窄），
+  # 而 task 详情和参与日志又因为 !==defaultTaskId 的分支被跳过 —— 语义正好拧着。
+  defaultTaskId: task-identity-skip
+  # 身份来源只剩一条：DSH（Mac 上的幕僚长）发不出身份头，只能按路由预设。
+  # 其余客户端（OMP / Paseo Lead / Reviewer / opencode / tdam-bind 生成的项目配置）
+  # 都显式带 x-team-id / x-agent-id / x-task-id，不再由路由名决定归属 ——
+  # 换模型不改记忆归属，同一席位不同模型落同一个 agent。
   routeIdentities:
-    # ── 个人工位（team-awpqj5bfn6）──
-    omp:
-      team_id: team-awpqj5bfn6
-      agent_id: agt-awrde599w5
-      task_id: task-awshfblu7q
-    claude-code:
-      team_id: team-awpqj5bfn6
-      agent_id: agt-awrdcsatvm
-      task_id: task-awshfblu7q
-    codex:
-      team_id: team-awpqj5bfn6
-      agent_id: agt-awre8n2eew
-      task_id: task-awshfblu7q
-    cursor:
-      team_id: team-awpqj5bfn6
-      agent_id: agt-awre4n162g
-      task_id: task-awshfblu7q
-    genericagent:
-      team_id: team-awpqj5bfn6
-      agent_id: agt-awreze0em1
-      task_id: task-awshfblu7q
-    genericagent-mac:
-      team_id: team-awpqj5bfn6
-      agent_id: agt-awreze0em1
-      task_id: task-awshfblu7q
-    newapi-tencent-cc:
-      team_id: team-awpqj5bfn6
-      agent_id: agt-awrdcsatvm
-      task_id: task-awshfblu7q
-    newapi-tencent-pro:
-      team_id: team-awpqj5bfn6
-      agent_id: agt-awre8n2eew
-      task_id: task-awshfblu7q
-    newapi-tencent-pro-low:
-      team_id: team-awpqj5bfn6
-      agent_id: agt-awre8n2eew
-      task_id: task-awshfblu7q
-    newapi-tencent-ds:
-      team_id: team-awpqj5bfn6
-      agent_id: agt-awrde599w5
-      task_id: task-awshfblu7q
-    newapi-tencent-glm:
-      team_id: team-awpqj5bfn6
-      agent_id: agt-awrde599w5
-      task_id: task-awshfblu7q
-    newapi-tencent-kimi:
-      team_id: team-awpqj5bfn6
-      agent_id: agt-awrde599w5
-      task_id: task-awshfblu7q
-    newapi-tencent-grok:
-      team_id: team-awpqj5bfn6
-      agent_id: agt-awrde599w5
-      task_id: task-awshfblu7q
-    cliproxyapi-tencent-gemini:
-      team_id: team-awpqj5bfn6
-      agent_id: agt-awrde599w5
-      task_id: task-awshfblu7q
-    # ── 评测团队（team-9wnplsilcp）──
-    genericagent-win:
-      team_id: team-9wnplsilcp
-      agent_id: agt-awrfkdpcf9
-      task_id: task-awshby5o2a
-    newapi-tencent-eval:
-      team_id: team-9wnplsilcp
-      agent_id: agt-9wnq5fhdpt
-      task_id: task-awshby5o2a
-    # ── 开发三席（team-9wnqh5zsy3）──
-    newapi-tencent-cc-qayk:
-      team_id: team-9wnqh5zsy3
-      agent_id: agt-9wnqqh0a1b
-      task_id: task-awsh84s90l
-    newapi-tencent-pro-qayk:
-      team_id: team-9wnqh5zsy3
-      agent_id: agt-awrgjid5tc
-      task_id: task-awsh84s90l
-    # ── 全局记忆总管（team-9wnq4ojn52）──
-    # 不带 task_id：跨团队检索需要覆盖各来源的全部记忆
     dsh:
-      team_id: team-9wnq4ojn52
-      agent_id: agt-9wnqlax2mz
+      team_id: team-eddlrpyso7
+      agent_id: agt-eddr05j3ad
+      # 不带 task_id：跨团队总管要覆盖各来源的全部记忆，带 task 会把召回缩窄
   headerAutoSelect:
     enabled: true
     teamHeader: x-team-id
     agentHeader: x-agent-id
     taskHeader: x-task-id
-    onMismatch: bypass
+    # team 不在该用户可见列表、或 agent 不在该 team 下时：
+    #   bypass = 把这个会话永久标记成无记忆（写错一次就整轮静默失去记忆，查不到痕迹）
+    #   form   = 走资产确认级联，客户端当场看到"要你选团队"的回复
+    # 单人多席位要的是后者：配错了要吵，不要闷声丢记忆。
+    onMismatch: form
+  # 预设 team + agent 都命中时跳过资产确认弹框，一步到位 initialized。
+  skipAssetConfirm: true
 injection:
   enabled: true
+  # 注入给席位的 <skill_tools>/<tdai_memory_tools> 里那些 curl 用的公网基址。
+  # 执行 curl 的是跑在用户机器上的编码客户端，所以必须是公网域名，
+  # 不能填 RAILWAY_PRIVATE_DOMAIN。不填时代码退回本机容器 IP:8096，席位根本调不通
+  # （线上两边启动日志都实测打了这条 fallback 警告）。
+  # ⚠️ 这个字段不走 ${ENV} 展开（config.ts 只做 trim + 去尾斜杠），只能写死。
+  # 换 Railway 域名时要一起改这里。
+  externalGatewayUrl: https://memory-proxy-production-05b8.up.railway.app
   injectors:
   - skill
   - knowledge
@@ -183,6 +137,9 @@ extraction:
   - skill
   - tdai-memory
 redis:
+  # 限流器在 v2.0.2 是默认开的（1000000 TPM / 100 QPM），
+  # 但没有 Redis 时计数无处落，日志直接打 rate_limit.fail_open 放行。
+  # 单人自用的入口本身已被 user key 卡住，这里先不为限流单独买一个 Redis。
   enabled: false
 storage:
   enabled: true
@@ -202,61 +159,34 @@ creditReport:
   enabled: false
 superAdmin:
   enabled: true
-  team_id: "team-9wnq4ojn52"
+  team_id: "team-eddlrpyso7"
   apiKey: "${TDAI_PROXY_ADMIN_API_KEY}"
-  # 显式来源清单：只有 team-9wnq4ojn52 上的身份会额外看到这些来源；其他 team 的
-  # 身份无论此表内容都只看自己 + 本 team 授权绑定。这里的条目同时决定
-  # 「自动注入（fixed asset）」与「显式读取（memory-bridge）」的可见范围 ——
-  # 二者共用同一份判定，避免出现注入与读取范围不一致。
-  # 跨来源只读：超管可读这些来源，但对其发起的写/更新/删除会被拒绝。
+  # 命中条件只看 team_id 是否等于上面的 team —— 与 agent_id / user_id 无关，
+  # 所以只有幕僚长团队（team-eddlrpyso7）会额外看到这张表。
+  # 这张表同时决定「自动注入（L3 画像 + 3 行 L2 场景索引）」与「memory-bridge
+  # 显式读取」的范围，两者共用一份判定，不会出现能注入不能读的不一致。
+  # 只读由 isSelf 保证：source 条目恒为 isSelf:false，写/删会 403 code=40304，
+  # 比对的是「整三元组是否等于调用者」，不是 user_id —— 下面 user_id 全部等于
+  # 调用者自己的 usr-ctyrmbi42c 也关不掉只读保护。
+  # user_id 只影响 L0/L1 检索过滤，填错会让该来源的对话召回静默为空（L3/L2 不受影响）。
+  # 刻意排除 Reviewer：审查席位要独立视角，总管不许回想它。
   sources:
-    # ── 个人助理 ──
-    - team_id: team-awpqj5bfn6
-      user_id: usr-9wnp5led1n
-      agent_id: agt-awrde599w5
-      name: personal/omp
-    - team_id: team-awpqj5bfn6
-      user_id: usr-9wnp5led1n
-      agent_id: agt-awrdcsatvm
-      name: personal/claude-code
-    - team_id: team-awpqj5bfn6
-      user_id: usr-9wnp5led1n
-      agent_id: agt-awre8n2eew
-      name: personal/codex
-    - team_id: team-awpqj5bfn6
-      user_id: usr-9wnp5led1n
-      agent_id: agt-awreze0em1
-      name: personal/genericagent
-    - team_id: team-awpqj5bfn6
-      user_id: usr-9wnp5led1n
-      agent_id: agt-awre4n162g
-      name: personal/cursor
-    # ── 评测团队 ──
-    - team_id: team-9wnplsilcp
-      user_id: usr-9wnp5led1n
-      agent_id: agt-9wnq5fhdpt
-      name: evaluation/omp-eval
-    - team_id: team-9wnplsilcp
-      user_id: usr-9wnp5led1n
-      agent_id: agt-awrfkdpcf9
-      name: evaluation/genericagent-win
-    - team_id: team-9wnplsilcp
-      user_id: usr-9wnp5led1n
-      agent_id: agt-awrfr5frbm
-      name: evaluation/coordinator
-    # ── 开发三席 ──
-    - team_id: team-9wnqh5zsy3
-      user_id: usr-9wnp5led1n
-      agent_id: agt-9wnqqh0a1b
-      name: dev/lead
-    - team_id: team-9wnqh5zsy3
-      user_id: usr-9wnp5led1n
-      agent_id: agt-awrgjid5tc
-      name: dev/reviewer
-    - team_id: team-9wnqh5zsy3
-      user_id: usr-9wnp5led1n
-      agent_id: agt-awrgd0ncgb
-      name: dev/writer
+    - team_id: team-eddmd25qjy
+      user_id: usr-ctyrmbi42c
+      agent_id: agt-eddslurtwt
+      name: 编码开发/Lead
+    - team_id: team-eddmd25qjy
+      user_id: usr-ctyrmbi42c
+      agent_id: agt-eddu029y0z
+      name: 编码开发/开发者
+    - team_id: team-eddp1ep2s7
+      user_id: usr-ctyrmbi42c
+      agent_id: agt-eddxuea6az
+      name: 运维部署/运维
+    - team_id: team-eddp1ep2s7
+      user_id: usr-ctyrmbi42c
+      agent_id: agt-eddze6hfrd
+      name: 运维部署/巡检
 admin:
   apiKey: "${TDAI_PROXY_ADMIN_API_KEY}"
   # 运维旁路代表的内核 user_key（内核 Layer3 校验用）。留空会让 fixed-asset 等

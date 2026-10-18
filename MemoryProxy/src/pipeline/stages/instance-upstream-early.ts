@@ -15,7 +15,7 @@ import type { Context } from "hono";
 import type { ProxyConfig } from "../../types.js";
 import {
   getInstanceUpstreamConfigs,
-  resolveForAgent,
+  resolveForAgentWithLocal,
   resolveExtraction,
   shouldOverride,
   type Resolution,
@@ -59,7 +59,7 @@ export async function stageInstanceUpstreamEarly(
   const legacyProxy = isLegacyProxyPath(c.req.path);
   const earlyConvResolution: Resolution = legacyProxy
     ? { kind: "official", row: null }
-    : resolveForAgent(instanceConfigs, agent ?? "");
+    : resolveForAgentWithLocal(instanceConfigs, agent ?? "", config.upstream.agents);
   const earlyExtractRow = resolveExtraction(instanceConfigs);
   const earlySysMatch = hasSystemUsers() ? matchSystemUserByUserId(earlyUserId) : null;
 

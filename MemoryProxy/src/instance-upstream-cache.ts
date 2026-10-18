@@ -239,6 +239,32 @@ export function resolveForAgent(
 }
 
 /**
+ * fork 补丁（单实例自建部署）：proxy 自己的 `upstream.agents` 里配了这条路由
+ * （URL + key 来自 yaml 与 Railway env）就视为已托管，不要求 Core 侧必须存在
+ * 覆盖该 agent 的 upstream group。
+ *
+ * 官方闸门只认 Panel 里配置的组，假设的是多租户 SaaS：运维在 Panel 给 agent 分配
+ * 上游。我们的部署把路由表写在 proxy 配置里，自定义路由名（newapi-tencent-* 这类
+ * 一路由一上游 key）在 Core 没有对应组，会被判成 unmanaged 直接 400，客户端整条
+ * 通道失效。Core 已经有行覆盖时语义不变：这里只把 unmanaged 降级成 official。
+ */
+export function resolveForAgentWithLocal(
+  items: InstanceUpstreamRow[],
+  agentSource: string,
+  localAgents?: Record<string, unknown>,
+): Resolution {
+  const res = resolveForAgent(items, agentSource);
+  if (
+    res.kind === "unmanaged" &&
+    localAgents &&
+    Object.prototype.hasOwnProperty.call(localAgents, res.agent)
+  ) {
+    return { kind: "official", row: null };
+  }
+  return res;
+}
+
+/**
  * 抽取请求解析:systemUser 请求专用。
  *
  * 三种情况都返回 null(优雅回退到全局 upstream + alias,永远不 block):

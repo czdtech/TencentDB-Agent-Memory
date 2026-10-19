@@ -385,7 +385,7 @@ describe("memory-bridge source scope", () => {
     expect(deniedBody.code).toBe(40303);
   });
 
-  it("rejects a super-admin write aimed at another source with 403 and no upstream call", async () => {
+  it("refuses a write aimed at another source before scope resolution", async () => {
     await seedSession("sess-super", {
       session_id: "sess-super",
       team_id: "team-super",
@@ -403,11 +403,11 @@ describe("memory-bridge source scope", () => {
     const body: { code: number } = await res.json();
 
     expect(res.status).toBe(403);
-    expect(body.code).toBe(40304);
+    expect(body.code).toBe(40301);
     expect(calls).toHaveLength(0);
   });
 
-  it("still forwards a super-admin write to its own memory", async () => {
+  it("refuses even the caller's own write: the bridge is read-only by construction", async () => {
     await seedSession("sess-super", {
       session_id: "sess-super",
       team_id: "team-super",
@@ -422,12 +422,44 @@ describe("memory-bridge source scope", () => {
     const res = await handler(
       bridgeContext("conversation/add", { messages: [{ role: "user", content: "hi" }] }, "sess-super"),
     );
+    const body: { code: number } = await res.json();
 
-    expect(res.status).toBe(200);
-    expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe("https://kernel.test/v3/conversation/add");
-    expect(calls[0].body.team_id).toBe("team-super");
-    expect(calls[0].body.agent_id).toBe("agt-super");
-    expect(calls[0].body.messages).toEqual([{ role: "user", content: "hi" }]);
+    expect(res.status).toBe(403);
+    expect(body.code).toBe(40301);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("forwards every read subpath to the kernel", async () => {
+    await seedSession("sess-x", {
+      session_id: "sess-x",
+      team_id: "team-x",
+      user_id: "usr-x",
+      agent_id: "agt-x",
+      user_key: "sk-x",
+      space_id: "default",
+    });
+    kernelStub();
+    const calls: UpstreamCall[] = [];
+    const handler = createMemoryBridgeHandler(makeConfig(), { fetcher: upstreamStub(calls) });
+
+    for (const sub of [
+      "atomic/search",
+      "atomic/query",
+      "conversation/search",
+      "conversation/query",
+      "scenario/ls",
+      "scenario/read",
+    ]) {
+      const res = await handler(bridgeContext(sub, { path: "scenes/x.md", prefix: "" }, "sess-x"));
+      expect(`${sub} -> ${res.status}`).toBe(`${sub} -> 200`);
+    }
+    expect(calls.map((call) => call.url)).toEqual([
+      "https://kernel.test/v3/atomic/search",
+      "https://kernel.test/v3/atomic/query",
+      "https://kernel.test/v3/conversation/search",
+      "https://kernel.test/v3/conversation/query",
+      "https://kernel.test/v3/scenario/ls",
+      "https://kernel.test/v3/scenario/read",
+    ]);
   });
 });

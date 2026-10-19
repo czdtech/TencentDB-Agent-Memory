@@ -54,6 +54,42 @@ export const ZH_STOP_WORDS = new Set([
 ]);
 
 /**
+ * Escape a single token into a safe FTS5 literal phrase.
+ *
+ * FTS5 query syntax reserves characters/keywords that, when fed raw user
+ * input, can change query semantics or trigger a syntax error (injection):
+ * quotes (`"` `'`), prefix wildcard (`*`), grouping (`(` `)`), boolean ops
+ * (`AND` `OR` `NOT`), proximity (`NEAR`), column qualifier (`:`), caret (`^`),
+ * and minus (`-`).
+ *
+ * The recommended defence is to wrap every token in double quotes so it is
+ * parsed as a *literal phrase*: inside a phrase the only character that needs
+ * escaping is the double quote itself, written as two consecutive quotes
+ * (`""`). Once quoted, all reserved characters lose their syntactic meaning
+ * and become ordinary text.
+ *
+ * We *escape* (not strip) the double quote so literal content is preserved —
+ * stripping would silently drop characters and hurt recall.
+ */
+export function sanitizeFtsToken(token: string): string {
+  return `"${token.replaceAll('"', '""')}"`;
+}
+
+/**
+ * Whitelist-based sanitiser for raw FTS5 query input (defence-in-depth).
+ *
+ * Keeps only characters that are safe and meaningful for keyword search —
+ * letters, digits, underscore, whitespace, dot, slash and hyphen — and drops
+ * every FTS5 operator at the character level before it can reach the parser.
+ * Operators made of plain letters (AND/OR/NOT/NEAR) survive by design; the
+ * quoting in sanitizeFtsToken neutralises them later.
+ */
+export function sanitizeFtsWhitelist(raw: string): string {
+  if (typeof raw !== "string" || raw.length === 0) return "";
+  return raw.replace(/[^\p{L}\p{N}_\s./-]/gu, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
  * Build an FTS5 MATCH query from raw text.
  *
  * When `@node-rs/jieba` is available, uses jieba's search-engine mode
@@ -94,7 +130,7 @@ export function buildFtsQuery(raw: string): string | null {
   }
 
   if (tokens.length === 0) return null;
-  const quoted = tokens.map((t) => `"${t.replaceAll('"', "")}"`);
+  const quoted = tokens.map(sanitizeFtsToken);
   return quoted.join(" OR ");
 }
 

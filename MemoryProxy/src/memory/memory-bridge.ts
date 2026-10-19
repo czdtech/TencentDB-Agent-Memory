@@ -43,10 +43,12 @@ const TAG = "[memory-bridge]";
  *     atomic/* 与 conversation/* 的 search/query。
  *   - L2：system 给索引 `<l2_scene_index>`，正文按需读 → 放行 scenario/ls + scenario/read。
  *   - L3（persona）：直接注入 system，无需工具 → **不放行** core/read。
- *   - 唯一的写端点是 conversation/add（主链路回流用的同一个端点），且只允许
- *     写调用者自身身份；其余 write / rm / update / delete 一律不开放，走主链路。
+ *   - bridge 只读：写端点一律不放行（含 conversation/add）。主链路的 L0 归档由 proxy
+ *     自己直连 core `/v3/skill/conversation/add`，不经这条由 LLM curl 的通道 —— 因为
+ *     这条通道的身份只来自 session binding（不出示设备 key），给它写口等于把
+ *     「往某个席位记忆里插一条」降级成「猜到一个 session id」。
  */
-const READ_SUBPATHS: Record<string, true> = {
+const ALLOWED_SUBPATHS: Record<string, true> = {
   "atomic/search": true,
   "atomic/query": true,
   "conversation/search": true,
@@ -54,13 +56,6 @@ const READ_SUBPATHS: Record<string, true> = {
   "scenario/ls": true,
   "scenario/read": true,
 };
-
-/** 写端点：只能作用于调用者自身的 (team, user, agent)，不得指向借入来源。 */
-const WRITE_SUBPATHS: Record<string, true> = {
-  "conversation/add": true,
-};
-
-const ALLOWED_SUBPATHS: Record<string, true> = { ...READ_SUBPATHS, ...WRITE_SUBPATHS };
 
 interface SessionIdFields {
   user_id: string;
@@ -284,18 +279,6 @@ function selectTargetCtx(ctxs: FixedAssetCtx[], requestedAgentId: unknown): Fixe
   return ctxs.find((ctx) => ctx.isSelf) ?? ctxs[0];
 }
 
-/**
- * 写端点（`conversation/add`）的作用域收敛：只保留调用者自身身份。
- *
- * 读授权（含跨来源）已在 `resolveMemoryCtxs` → `resolveFixedAssetCtxs` 里一次性
- * 判定：同 team 借入来源走内核 ACL，超管的跨 team 来源来自显式配置。这里只处理
- * 端点语义差异 —— 超管能**读**所有配置来源，但不能借身份对其他来源**写**。
- */
-function scopeCtxsForEndpoint(ctxs: FixedAssetCtx[], isWrite: boolean): FixedAssetCtx[] {
-  if (!isWrite) return ctxs;
-  return ctxs.filter((target) => target.isSelf);
-}
-
 const MULTI_SEARCH_SUBPATHS = new Set(["atomic/search", "conversation/search"]);
 
 function limitFromBody(body: Record<string, unknown>, fallback = 5): number {
@@ -457,13 +440,7 @@ export function createMemoryBridgeHandler(
       "Content-Type": "application/json",
     };
 
-    // 端点分类决定作用域：读端点可跨来源（仅限已授权 ctx），写端点只能作用于
-    // 调用者自身身份。
-    const isWriteSubpath = WRITE_SUBPATHS[sub] === true;
-    const ctxs = scopeCtxsForEndpoint(
-      await resolveMemoryCtxs(config, ids, sessionKey),
-      isWriteSubpath,
-    );
+    const ctxs = await resolveMemoryCtxs(config, ids, sessionKey);
     // Search stays cross-session: core treats session_id as a session_key
     // filter, so only forward it when the caller explicitly supplied one.
     const effectiveTaskId = modelTaskId ?? ids.task_id;
@@ -575,16 +552,6 @@ export function createMemoryBridgeHandler(
     try {
       const target = selectTargetCtx(ctxs, inboundBody.agent_id);
       if (!target) {
-        // 写端点被请求指向非自身来源 —— 显式的跨来源修改拒绝。
-        if (isWriteSubpath) {
-          emitBridgeRejectTelemetry({
-            sessionKey: ids.composite_key ?? sessionKey, bridgeSource: "memory-bridge",
-            rejectReason: "cross_source_mutation", httpStatus: 403,
-            executedEndpoint: sub, spaceId: ids.space_id,
-            userId: ids.user_id, teamId: ids.team_id, agentId: ids.agent_id,
-          });
-          return envelope(40304, `${TAG} '${sub}' may only write the caller's own memory`, 403);
-        }
         return envelope(40303, `${TAG} requested agent memory is not authorized`, 403);
       }
       upstream = await callUpstream(target);

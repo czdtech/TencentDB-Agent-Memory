@@ -139,6 +139,7 @@ interface EmbeddingMeta {
   provider: string;
   model: string;
   dimensions: number;
+  maxInputChars?: number;
 }
 
 /** Result of VectorStore.init() — indicates whether a re-embed is needed. */
@@ -425,12 +426,20 @@ export class VectorStore implements IMemoryStore {
         const providerChanged = savedMeta.provider !== providerInfo.provider;
         const modelChanged = savedMeta.model !== providerInfo.model;
         const dimsChanged = savedMeta.dimensions !== this.dimensions;
+        const maxCharsChanged =
+          providerInfo.maxInputChars != null &&
+          savedMeta.maxInputChars !== providerInfo.maxInputChars;
 
-        if (providerChanged || modelChanged || dimsChanged) {
+        if (providerChanged || modelChanged || dimsChanged || maxCharsChanged) {
           const reasons: string[] = [];
           if (providerChanged) reasons.push(`provider: ${savedMeta.provider} → ${providerInfo.provider}`);
           if (modelChanged) reasons.push(`model: ${savedMeta.model} → ${providerInfo.model}`);
           if (dimsChanged) reasons.push(`dimensions: ${savedMeta.dimensions} → ${this.dimensions}`);
+          if (maxCharsChanged) {
+            reasons.push(
+              `maxInputChars: ${savedMeta.maxInputChars ?? "unset"} → ${providerInfo.maxInputChars}`,
+            );
+          }
           reindexReason = reasons.join(", ");
 
           this.logger?.info(
@@ -1045,6 +1054,9 @@ export class VectorStore implements IMemoryStore {
         provider: providerInfo.provider,
         model: providerInfo.model,
         dimensions: this.dimensions,
+        ...(providerInfo.maxInputChars != null
+          ? { maxInputChars: providerInfo.maxInputChars }
+          : {}),
       });
     }
 

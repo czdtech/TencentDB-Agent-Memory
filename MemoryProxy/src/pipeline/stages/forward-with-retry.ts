@@ -56,6 +56,7 @@ export async function stageForwardWithRetry(
 ): Promise<ForwardWithRetryResult> {
   let upstreamResp: Response | undefined;
   let forwardFailed = false;
+  let timedOut = false;
 
   const setTimeoutSignal = (init: RequestInit) => {
     if (input.timeoutBehavior === "always") {
@@ -85,11 +86,45 @@ export async function stageForwardWithRetry(
     upstreamResp = await fetch(input.target.url, primaryFetchOpts);
   } catch (err: unknown) {
     if (err instanceof DOMException && err.name === "TimeoutError") {
+      timedOut = true;
       input.pipe.error("FORWARD", `Timeout after ${input.forwardTimeoutMs / 1000}s`);
     } else {
       input.pipe.error("FORWARD", err);
     }
     forwardFailed = true;
+  }
+
+  // ── Transient 502/503/504 in-place retry ───────────────────────────────────
+  // Upstream edge gateways (e.g. Railway) occasionally return transient 502 Bad Gateway
+  // or 503 Service Unavailable during container restarts or edge reconnections.
+  // Perform one quick retry (500ms backoff) to prevent downstream clients (like OpenCode)
+  // from immediately canceling tasks and triggering unwanted model fallback.
+  if (
+    !timedOut &&
+    (forwardFailed || (upstreamResp && upstreamResp.status >= 502 && upstreamResp.status <= 504)) &&
+    !input.target.retryTarget
+  ) {
+    const statusText = forwardFailed ? "connection error" : `${upstreamResp!.status}`;
+    input.pipe.info("FORWARD_RETRY", `Upstream transient error (${statusText}), retrying in 500ms...`);
+    await new Promise<void>((resolve) => setTimeout(resolve, 500));
+    try {
+      const retryFetchOpts: RequestInit = {
+        method: "POST",
+        headers: input.upstreamHeaders,
+        body: JSON.stringify(input.upstreamBody),
+      };
+      setTimeoutSignal(retryFetchOpts);
+      upstreamResp = await fetch(input.target.url, retryFetchOpts);
+      forwardFailed = false;
+      if (upstreamResp.ok) {
+        input.pipe.info("FORWARD_RETRY_SUCCESS", `Retry returned ${upstreamResp.status}`);
+      } else {
+        input.pipe.error("FORWARD_RETRY_FAILED", `Retry returned ${upstreamResp.status}`);
+      }
+    } catch (retryErr: unknown) {
+      input.pipe.error("FORWARD_RETRY_ERROR", retryErr);
+      forwardFailed = true;
+    }
   }
 
   if (upstreamResp) {

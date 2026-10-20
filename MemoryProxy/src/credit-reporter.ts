@@ -124,7 +124,7 @@ export function extractSpaceIdFromPath(path: string): string | null {
   if (match) {
     const agent = safePath.split("/").filter(Boolean)[0] ?? "";
     // Only capture spaceId when the first segment looks like an agent name
-    if (/^(claude-code|codebuddy|codex|cursor|hermes|openclaw|workbuddy|dsh|opencode|pi)$/i.test(agent)) {
+    if (/^(claude-code|codebuddy|codex|cursor|hermes|openclaw|workbuddy|dsh|opencode|pi|(?:newapi-|cliproxyapi-)?tencent-[a-z0-9-]+)$/i.test(agent)) {
       return match[1] || null;
     }
   }
@@ -418,6 +418,15 @@ export async function tryReportCreditFromPath(
   // reach this function, but this guard ensures future refactors cannot
   // accidentally bill extension consumption to the caller's memory space.
   if (event === "analyzer_usage") {
+    return { attempted: false, ok: false };
+  }
+
+  // Opt-out switch: `creditReport.enabled: false` in proxy.yaml skips the
+  // report entirely. attempted=false means callers stay silent — no
+  // CREDIT_REPORT error log, no x-credit-report-error header, no
+  // failed-report row — which is what self-hosted deployments want when
+  // there is no billing gateway to talk to.
+  if (config.enabled === false) {
     return { attempted: false, ok: false };
   }
 

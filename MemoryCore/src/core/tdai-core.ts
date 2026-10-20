@@ -34,6 +34,7 @@ import type { IMemoryStore } from "./store/types.js";
 import type { EmbeddingService } from "./store/embedding.js";
 import type { StorageAdapter } from "./storage/adapter.js";
 import { performAutoRecall } from "./hooks/auto-recall.js";
+import { resolveCallerScope, type ScopeInput } from "./request-scope.js";
 import { reportRecallMetrics } from "./report/metric-tracking-recall.js";
 import { performAutoCapture } from "./hooks/auto-capture.js";
 import { executeMemorySearch, formatSearchResponse } from "./tools/memory-search.js";
@@ -161,6 +162,8 @@ export class TdaiCore {
   private vectorStore?: IMemoryStore;
   private embeddingService?: EmbeddingService;
   private scheduler?: MemoryPipelineManager;
+  private needsEmbeddingReindex = false;
+  private embeddingReindexReason?: string;
   /**
    * Promise gate for the one-shot scheduler-start sequence.
    *
@@ -384,13 +387,24 @@ export class TdaiCore {
    * Handle recall (memory retrieval) before an LLM turn.
    * Maps to: OpenClaw `before_prompt_build` / Hermes `prefetch()`.
    */
-  async handleBeforeRecall(userText: string, sessionKey: string): Promise<RecallResult> {
+  async handleBeforeRecall(userText: string, sessionKey: string, identity?: ScopeInput): Promise<RecallResult> {
+    const decision = resolveCallerScope({ ...identity, headerSessionId: identity?.headerSessionId || sessionKey, bodySessionId: identity?.bodySessionId || sessionKey });
+    if (!decision.ok) {
+      return {
+        prependContext: "",
+        appendSystemContext: "",
+        recalledL1Memories: [],
+        recalledL3Persona: null,
+        recallStrategy: "refused",
+        error: { code: decision.status === 403 ? 10043 : 10042, category: "config", message: decision.message, retryable: false },
+      };
+    }
     await this.storeReady?.catch(() => {});
 
     const tStart = performance.now();
     const result = await performAutoRecall({
       userText,
-      actorId: "default_user",
+      actorId: decision.scope.userId,
       sessionKey,
       cfg: this.cfg,
       pluginDataDir: this.dataDir,
@@ -398,6 +412,7 @@ export class TdaiCore {
       vectorStore: this.vectorStore,
       embeddingService: this.embeddingService,
       storage: this.storage,
+      profileIsolation: { teamId: decision.scope.teamId, agentId: decision.scope.agentId, userId: decision.scope.userId },
     });
     const recallLatencyMs = performance.now() - tStart;
 
@@ -430,6 +445,9 @@ export class TdaiCore {
       messages: turn.messages,
       sessionKey: turn.sessionKey,
       sessionId: turn.sessionId,
+      teamId: turn.teamId,
+      userId: turn.userId,
+      agentId: turn.agentId,
       cfg: this.cfg,
       pluginDataDir: this.dataDir,
       logger: this.logger,
@@ -448,12 +466,17 @@ export class TdaiCore {
    * Search L1 structured memories.
    * Maps to: `tdai_memory_search` tool.
    */
-  async searchMemories(params: MemorySearchParams): Promise<{ text: string; total: number; strategy: string }> {
+  async searchMemories(params: MemorySearchParams & { identity?: ScopeInput }): Promise<{ text: string; total: number; strategy: string }> {
+    const decision = resolveCallerScope(params.identity ?? {});
+    if (!decision.ok) {
+      return { text: decision.message, total: 0, strategy: "refused" };
+    }
     const result = await executeMemorySearch({
       query: params.query,
       limit: params.limit ?? 5,
       type: params.type,
       scene: params.scene,
+      filter: { teamId: decision.scope.teamId, userId: decision.scope.userId, agentId: decision.scope.agentId },
       vectorStore: this.vectorStore,
       embeddingService: this.embeddingService,
       logger: this.logger,
@@ -470,11 +493,16 @@ export class TdaiCore {
    * Search L0 raw conversations.
    * Maps to: `tdai_conversation_search` tool.
    */
-  async searchConversations(params: ConversationSearchParams): Promise<{ text: string; total: number }> {
+  async searchConversations(params: ConversationSearchParams & { identity?: ScopeInput }): Promise<{ text: string; total: number; strategy?: string }> {
+    const decision = resolveCallerScope(params.identity ?? {});
+    if (!decision.ok) {
+      return { text: decision.message, total: 0, strategy: "refused" };
+    }
     const result = await executeConversationSearch({
       query: params.query,
       limit: params.limit ?? 5,
       sessionKey: params.sessionKey,
+      filter: { teamId: decision.scope.teamId, userId: decision.scope.userId, agentId: decision.scope.agentId },
       vectorStore: this.vectorStore,
       embeddingService: this.embeddingService,
       logger: this.logger,
@@ -541,6 +569,38 @@ export class TdaiCore {
   /** Get the shared EmbeddingService (may be undefined if not configured). */
   getEmbeddingService(): EmbeddingService | undefined {
     return this.embeddingService;
+  }
+
+  /**
+   * Start embedding warmup after asynchronous store initialization completes.
+   * This is intentionally non-blocking for local model download/load.
+   */
+  async warmupEmbedding(): Promise<void> {
+    await this.storeReady;
+    const embedding = this.embeddingService;
+    if (!embedding) return;
+    embedding.startWarmup();
+    const deadline = Date.now() + 15 * 60_000;
+    while (!embedding.isReady() && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    if (!embedding.isReady()) {
+      throw new Error("Embedding service did not become ready before reindex deadline");
+    }
+    if (this.needsEmbeddingReindex && this.vectorStore?.reindexAll) {
+      const reason = this.embeddingReindexReason ?? "embedding configuration changed";
+      this.logger.info(`${TAG} Starting embedding reindex: ${reason}`);
+      const result = await this.vectorStore.reindexAll(
+        (text) => embedding.embed(text),
+        (done, total, layer) => {
+          if (done === total || done % 100 === 0) {
+            this.logger.info(`${TAG} Reindex progress ${layer} ${done}/${total}`);
+          }
+        },
+      );
+      this.logger.info(`${TAG} Embedding reindex finished: L1=${result.l1Count}, L0=${result.l0Count}`);
+      this.needsEmbeddingReindex = false;
+    }
   }
 
   /** Get the pipeline scheduler (may be undefined if extraction disabled). */
@@ -625,6 +685,8 @@ export class TdaiCore {
       const stores = await initStores(this.cfg, this.dataDir, this.logger);
       this.vectorStore = stores.vectorStore;
       this.embeddingService = stores.embeddingService;
+      this.needsEmbeddingReindex = stores.needsReindex;
+      this.embeddingReindexReason = stores.reindexReason;
       this.logger.debug?.(`${TAG} Stores initialized: backend=${this.cfg.storeBackend}, embedding=${this.cfg.embedding.provider}`);
     } catch (err) {
       this.logger.warn(

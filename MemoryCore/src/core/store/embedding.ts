@@ -13,6 +13,8 @@
  * - Throws on failure; callers decide fallback strategy.
  */
 
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { Logger } from "../types.js";
 
 // ============================
@@ -61,6 +63,8 @@ export interface EmbeddingProviderInfo {
   provider: string;
   /** Model identifier (e.g. "embeddinggemma-300m", "text-embedding-3-large") */
   model: string;
+  /** Client-side input cap used when generating vectors (local models). */
+  maxInputChars?: number;
 }
 
 export interface EmbeddingCallOptions {
@@ -132,6 +136,17 @@ export class EmbeddingNotReadyError extends Error {
 
 const TAG = "[memory-tdai][embedding]";
 
+/** Resolve user-home shorthand without turning it into a repo-relative path. */
+function resolveModelCacheDir(cacheDir?: string): string | undefined {
+  const trimmed = cacheDir?.trim();
+  if (!trimmed) return undefined;
+  if (trimmed === "~") return homedir();
+  if (trimmed.startsWith("~/") || trimmed.startsWith("~\\")) {
+    return join(homedir(), trimmed.slice(2));
+  }
+  return trimmed;
+}
+
 // ============================
 // Local (node-llama-cpp) implementation
 // ============================
@@ -144,15 +159,13 @@ const DEFAULT_LOCAL_MODEL =
 const LOCAL_DIMENSIONS = 768;
 
 /**
- * embeddinggemma-300m has a 256-token context window.
- * As a safe heuristic, we limit input to ~600 chars for CJK text
- * (CJK characters typically tokenize to 1-2 tokens each,
- *  so 600 chars ≈ 200-400 tokens, keeping well within 256-token limit
- *  after accounting for special tokens).
- * For Latin text, ~800 chars is a safe limit (~200 tokens).
- * We use 512 chars as a conservative universal limit.
+ * EmbeddingGemma-300m's published context is ~2048 tokens (not 256).
+ * Same heuristic as before: ~2 chars/token as a conservative mix of CJK
+ * (often 1–2 tokens/char) and Latin. 2048 tokens → 4096 chars.
+ * Still one vector per record; longer SOP/agent prompts no longer lose
+ * everything after the first 512 characters.
  */
-const LOCAL_MAX_INPUT_CHARS = 512;
+const LOCAL_MAX_INPUT_CHARS = 4096;
 
 /**
  * Sanitize NaN/Inf values and L2-normalize the vector.
@@ -201,7 +214,7 @@ export class LocalEmbeddingService implements EmbeddingService {
 
   constructor(config?: LocalEmbeddingConfig, logger?: Logger, importLlama?: ImportLlamaFn) {
     this.modelPath = config?.modelPath?.trim() || DEFAULT_LOCAL_MODEL;
-    this.modelCacheDir = config?.modelCacheDir?.trim();
+    this.modelCacheDir = resolveModelCacheDir(config?.modelCacheDir);
     this.logger = logger;
     this.importLlama = importLlama ?? defaultImportLlama;
   }
@@ -211,7 +224,7 @@ export class LocalEmbeddingService implements EmbeddingService {
   }
 
   getProviderInfo(): EmbeddingProviderInfo {
-    return { provider: "local", model: this.modelPath };
+    return { provider: "local", model: this.modelPath, maxInputChars: LOCAL_MAX_INPUT_CHARS };
   }
 
   /**
@@ -254,7 +267,7 @@ export class LocalEmbeddingService implements EmbeddingService {
    * @throws {EmbeddingNotReadyError} if model is not yet ready.
    */
   async embed(text: string, _options?: EmbeddingCallOptions): Promise<Float32Array> {
-    this.assertReady();
+    await this.waitUntilReady();
     const truncated = this.truncateInput(text);
     const embedding = await this.embeddingContext!.getEmbeddingFor(truncated);
     return sanitizeAndNormalize(embedding.vector);
@@ -266,7 +279,7 @@ export class LocalEmbeddingService implements EmbeddingService {
    */
   async embedBatch(texts: string[], _options?: EmbeddingCallOptions): Promise<Float32Array[]> {
     if (texts.length === 0) return [];
-    this.assertReady();
+    await this.waitUntilReady();
 
     const results: Float32Array[] = [];
     for (const text of texts) {
@@ -298,6 +311,23 @@ export class LocalEmbeddingService implements EmbeddingService {
   }
 
   /**
+   * Wait for startup warmup when a request arrives during model loading.
+   * This prevents harmless startup races from becoming metadata-only writes.
+   */
+  private async waitUntilReady(): Promise<void> {
+    // Some secondary routes can receive the first request before the shared
+    // core warmup hook reaches their embedding instance. Start lazily here so
+    // every route observes the same ready-before-embed contract.
+    if (this.initState === "idle") {
+      this.startWarmup();
+    }
+    if (this.initState === "initializing" && this.initPromise) {
+      await this.initPromise;
+    }
+    this.assertReady();
+  }
+
+  /**
    * Assert the model is ready. Throws EmbeddingNotReadyError if not.
    */
   private assertReady(): void {
@@ -323,8 +353,7 @@ export class LocalEmbeddingService implements EmbeddingService {
 
   /**
    * Truncate input text to stay within the model's context window.
-   * embeddinggemma-300m has a 256-token limit; we use a character-based
-   * heuristic (LOCAL_MAX_INPUT_CHARS) as a safe proxy.
+   * Character cap is a proxy for EmbeddingGemma's ~2048-token context.
    */
   private truncateInput(text: string): string {
     if (text.length <= LOCAL_MAX_INPUT_CHARS) return text;

@@ -3,7 +3,7 @@ import { HOOK_PRIORITY } from "../types.js";
 import { TdaiClient } from "../../tdai/client.js";
 import type { TdaiMemoryConfig } from "../../tdai/types.js";
 import { getTdaiIdentity } from "../../tdai/identity.js";
-import type { CoreSkillConfig } from "../../types.js";
+import type { CoreSkillConfig, MemorySuperAdminConfig } from "../../types.js";
 import { getMetadataClient } from "../../meta/client.js";
 import { resolveFixedAssetCtxs, type FixedAssetCtx } from "./tdai-fixed-asset.js";
 
@@ -41,6 +41,12 @@ export class TdaiProfileMemoryInjector implements InjectionHook {
   constructor(
     private baseConfig: TdaiMemoryConfig,
     private coreSkillCfg: Pick<CoreSkillConfig, "endpoint" | "serviceToken" | "serviceId" | "timeoutMs"> | null = null,
+    /**
+     * Cloud super-admin config (`superAdmin:` in YAML). Only the configured
+     * super-admin team gets the extra cross-team sources; every other team
+     * keeps self + same-team authorized assets.
+     */
+    private superAdmin: MemorySuperAdminConfig | undefined = undefined,
   ) {}
 
   async execute(ctx: AgentContext): Promise<ContextBlock[]> {
@@ -67,7 +73,6 @@ export class TdaiProfileMemoryInjector implements InjectionHook {
     const mc = this.coreSkillCfg && userKey
       ? getMetadataClient(this.coreSkillCfg, spaceId, userKey)
       : null;
-    const ctxs = await resolveFixedAssetCtxs(ctx, identity, mc);
 
     // Build a per-request TdaiClient with the correct tenant. Falls back to
     // baseConfig.serviceId (config value) when spaceId is empty.
@@ -75,6 +80,11 @@ export class TdaiProfileMemoryInjector implements InjectionHook {
       ...this.baseConfig,
       serviceId: spaceId || this.baseConfig.serviceId,
     });
+
+    // Same scope resolution as the explicit memory-bridge search: self + (for
+    // the configured super-admin team) the configured sources, otherwise self +
+    // same-team assets authorized by the kernel ACL.
+    const ctxs = await resolveFixedAssetCtxs(ctx, identity, mc, this.superAdmin, client);
 
     // 对每个 agent 独立拉 L3 + L2 索引（不读 L2 全文）
     const groups = await Promise.all(ctxs.map((c) => loadAgentProfile(client, c)));
@@ -155,7 +165,9 @@ function createPrewarmAgentContext(input: PrewarmInput): AgentContext {
       modelId: "prewarm",
       stream: false,
       agentSource: "session-init",
-      custom: { session: input.sessionInfo },
+      // `userKey` 是 shared resolver 做内核 ACL 校验时的调用者身份（Layer 3
+      // `x-tdai-user-key`）；prewarm 由 handler 透传 callerUserKey，见 PrewarmInput。
+      custom: { session: input.sessionInfo, userKey: input.callerUserKey },
     },
   };
 }

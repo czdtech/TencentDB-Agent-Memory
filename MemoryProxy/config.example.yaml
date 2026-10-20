@@ -509,6 +509,23 @@ admin:
   apiKey: ""               # 空 = 运维口公开（等价于不配）。生产建议通过
                            # env TDAI_PROXY_ADMIN_API_KEY 注入，避免落 git
 
+# ── Super admin（云端跨 team 只读来源） ────────────────────────────────────────
+# 只有 `team_id` 这个 team 的会话会额外看到 `sources` 里声明的来源；自动注入
+# （L2/L3）与 `/memory-bridge/v3/*` 检索共用这份列表。普通身份永远是
+# self + 同 team 的授权资产 —— 配置了 sources 也不会给它们跨 team 可见性。
+# 读写分界：超管可以**读**所有配置来源，但不能对其他来源写（`conversation/add`
+# 指向别人的 agent_id → 403 / code=40304）。
+# 优先级：env TDAI_SUPERADMIN_ENABLED / TDAI_SUPERADMIN_TEAM_ID /
+#         TDAI_SUPERADMIN_SOURCES_JSON > 本节 YAML。
+superAdmin:
+  enabled: false           # 开启需同时提供 team_id
+  team_id: ""              # 享受跨 team 来源的 team（不是 user）
+  apiKey: ""               # 可留空；留空时回退 admin.apiKey
+  sources: []              # 逐条声明来源，每项保留自己的身份：
+  # - team_id: team-xxxx
+  #   user_id: usr-xxxx
+  #   agent_id: agt-xxxx
+  #   name: team-a         # 注入/检索结果里展示的来源名（可选，缺省用 agent_id）
 
 # ── System users（内部服务账号：命中即全链路透传） ─────────────────────────────
 # 命中流程：先用 apiKey 走 auth/verify 拿到 user_id → user_id 在下方 systemUsers

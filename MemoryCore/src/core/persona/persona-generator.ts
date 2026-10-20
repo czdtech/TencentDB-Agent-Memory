@@ -32,6 +32,7 @@ export class PersonaGenerator {
   private instanceId: string | undefined;
   private storage: StorageAdapter | undefined;
   private traceContext: TraceContext | undefined;
+  private memoryCount: number | undefined;
 
   constructor(opts: {
     dataDir: string;
@@ -55,6 +56,8 @@ export class PersonaGenerator {
     storage?: StorageAdapter;
     /** langfuse 上报身份四元组（team/user/agent/session），填充 trace 顶级字段。 */
     traceContext?: TraceContext;
+    /** Authoritative L1 count for persona statistics. */
+    memoryCount?: number;
   }) {
     this.dataDir = opts.dataDir;
     this.logger = opts.logger;
@@ -64,6 +67,7 @@ export class PersonaGenerator {
     this.instanceId = opts.instanceId;
     this.storage = opts.storage;
     this.traceContext = opts.traceContext;
+    this.memoryCount = opts.memoryCount;
     // Use injected LLMRunner if available, otherwise fall back to CleanContextRunner
     this.runner = opts.llmRunner ?? new CleanContextRunner({
       config: opts.config,
@@ -175,6 +179,7 @@ export class PersonaGenerator {
       promptMode: this.promptMode,
       currentTime: new Date().toISOString(),
       totalProcessed: cp.total_processed,
+      memoryCount: this.memoryCount,
       sceneCount: index.length,
       changedSceneCount: changedScenes.length,
       changedScenesContent,

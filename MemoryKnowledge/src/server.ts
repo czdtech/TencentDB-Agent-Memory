@@ -173,8 +173,8 @@ async function startServer(): Promise<void> {
     );
   }
 
-  const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
-    log.info(`Knowledge service listening on http://localhost:${info.port}`);
+  const server = serve({ fetch: app.fetch, port: config.port, hostname: "0.0.0.0" }, (info: { port: number }) => {
+    log.info(`Knowledge service listening on http://0.0.0.0:${info.port}`);
   });
 
   let shuttingDown = false;

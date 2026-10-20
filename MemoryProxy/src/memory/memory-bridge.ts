@@ -28,29 +28,39 @@ import { getMetadataClient } from "../meta/client.js";
 import type { AgentContext } from "../injection/types.js";
 import { resolveFixedAssetCtxs, type FixedAssetCtx } from "../injection/injectors/tdai-fixed-asset.js";
 import type { TdaiIdentity } from "../tdai/types.js";
+import { TdaiClient } from "../tdai/client.js";
 import { emitBridgeToolCallTelemetry, emitBridgeRejectTelemetry, agentSourceFromSessionKey } from "./bridge-telemetry.js";
 
 const TAG = "[memory-bridge]";
 
 /**
- * 允许通过 bridge 转发的 tdai 子路径（**只读**，LLM 通过 Bash 工具按需调用）。
+ * 允许通过 bridge 转发的 tdai 子路径，按**真实端点语义**分类（LLM 通过 Bash
+ * 工具按需调用）。名字里带 search/query 不代表只读、反之亦然，所以读写一律由
+ * 下面的显式集合决定，不做名字匹配。
  *
  * 设计取舍：
  *   - L0/L1 不再每轮自动召回，改为静态工具按需检索（cache 友好），因此放行
  *     atomic/* 与 conversation/* 的 search/query。
  *   - L2：system 给索引 `<l2_scene_index>`，正文按需读 → 放行 scenario/ls + scenario/read。
  *   - L3（persona）：直接注入 system，无需工具 → **不放行** core/read。
- *
- * 写操作（write / rm / add / update / delete）一律不在 allowlist 里；写入走主链路。
+ *   - 唯一的写端点是 conversation/add（主链路回流用的同一个端点），且只允许
+ *     写调用者自身身份；其余 write / rm / update / delete 一律不开放，走主链路。
  */
-const ALLOWED_SUBPATHS = new Set<string>([
-  "atomic/search",        // L1 原子记忆 hybrid search
-  "atomic/query",         // L1 按 type/时间/分页
-  "conversation/search",  // L0 对话 hybrid search
-  "conversation/query",   // L0 按 session 取历史
-  "scenario/ls",          // L2 场景列表（path 索引）
-  "scenario/read",        // L2 按 path 读全文
-]);
+const READ_SUBPATHS: Record<string, true> = {
+  "atomic/search": true,
+  "atomic/query": true,
+  "conversation/search": true,
+  "conversation/query": true,
+  "scenario/ls": true,
+  "scenario/read": true,
+};
+
+/** 写端点：只能作用于调用者自身的 (team, user, agent)，不得指向借入来源。 */
+const WRITE_SUBPATHS: Record<string, true> = {
+  "conversation/add": true,
+};
+
+const ALLOWED_SUBPATHS: Record<string, true> = { ...READ_SUBPATHS, ...WRITE_SUBPATHS };
 
 interface SessionIdFields {
   user_id: string;
@@ -205,11 +215,37 @@ function selfCtx(ids: SessionIdFields): FixedAssetCtx {
   return { teamId: ids.team_id, userId: ids.user_id, agentId: ids.agent_id, agentName: ids.agent_id, isSelf: true };
 }
 
+/**
+ * [self, ...借入来源]。可见范围与自动注入共用同一份判定
+ * (`resolveFixedAssetCtxs` + `config.superAdmin`)：
+ *   - 超管 team → self + 显式配置的 sources（各自保留 team_id/user_id/agent_id/name）
+ *   - 普通身份 → self + 同 team 的 chat_memory 绑定
+ * 普通身份不会因为配置里存在 sources 而获得跨 team 可见性。
+ */
 async function resolveMemoryCtxs(config: ProxyConfig, ids: SessionIdFields, sessionKey: string): Promise<FixedAssetCtx[]> {
-  if (!ids.user_key) return [selfCtx(ids)];
+  const isSuperAdmin = config.superAdmin.enabled && ids.team_id === config.superAdmin.team_id;
+  // 普通身份缺 user_key 就调不动内核，退化为 self-only；超管的来源来自显式配置，
+  // 不需要内核调用。
+  if (!isSuperAdmin && !ids.user_key) return [selfCtx(ids)];
   try {
     const serviceId = ids.space_id || config.tdai?.serviceId || config.coreSkill.serviceId;
-    const metadataClient = getMetadataClient(config.coreSkill, serviceId, ids.user_key);
+    const metadataClient = ids.user_key
+      ? getMetadataClient(config.coreSkill, serviceId, ids.user_key)
+      : null;
+    // 同 team 借入来源的读授权由共享 resolver 用内核 ACL 判定（fail-closed），
+    // 与自动注入路径同一份判定，不再各写一套。
+    const aclClient = new TdaiClient({
+      enabled: config.tdai.enabled && config.tdai.memory.enabled,
+      endpoint: config.tdai.endpoint,
+      apiKey: config.tdai.apiKey,
+      serviceId: ids.space_id || config.tdai.serviceId,
+      writeL0: config.tdai.memory.writeL0,
+      recallL1: config.tdai.memory.recallL1,
+      injectL2L3: config.tdai.memory.injectL2L3,
+      l1Limit: config.tdai.memory.l1Limit,
+      l2Limit: config.tdai.memory.l2Limit,
+      timeoutMs: config.tdai.memory.timeoutMs,
+    });
     const identity: TdaiIdentity = {
       teamId: ids.team_id,
       userId: ids.user_id,
@@ -232,19 +268,32 @@ async function resolveMemoryCtxs(config: ProxyConfig, ids: SessionIdFields, sess
         custom: { session: ids, userKey: ids.user_key },
       },
     };
-    return await resolveFixedAssetCtxs(fakeCtx, identity, metadataClient);
+    return await resolveFixedAssetCtxs(fakeCtx, identity, metadataClient, config.superAdmin, aclClient);
   } catch (err) {
     console.warn(`${TAG} fixed asset ctx resolve failed: ${(err as Error).message}`);
     return [selfCtx(ids)];
   }
 }
 
-function selectTargetCtx(ctxs: FixedAssetCtx[], requestedAgentId: unknown): FixedAssetCtx {
+
+function selectTargetCtx(ctxs: FixedAssetCtx[], requestedAgentId: unknown): FixedAssetCtx | null {
   if (typeof requestedAgentId === "string" && requestedAgentId.trim()) {
     const found = ctxs.find((ctx) => ctx.agentId === requestedAgentId.trim());
-    if (found) return found;
+    return found ?? null;
   }
   return ctxs.find((ctx) => ctx.isSelf) ?? ctxs[0];
+}
+
+/**
+ * 写端点（`conversation/add`）的作用域收敛：只保留调用者自身身份。
+ *
+ * 读授权（含跨来源）已在 `resolveMemoryCtxs` → `resolveFixedAssetCtxs` 里一次性
+ * 判定：同 team 借入来源走内核 ACL，超管的跨 team 来源来自显式配置。这里只处理
+ * 端点语义差异 —— 超管能**读**所有配置来源，但不能借身份对其他来源**写**。
+ */
+function scopeCtxsForEndpoint(ctxs: FixedAssetCtx[], isWrite: boolean): FixedAssetCtx[] {
+  if (!isWrite) return ctxs;
+  return ctxs.filter((target) => target.isSelf);
 }
 
 const MULTI_SEARCH_SUBPATHS = new Set(["atomic/search", "conversation/search"]);
@@ -278,7 +327,7 @@ export function createMemoryBridgeHandler(
       });
       return envelope(40401, `${TAG} unknown path ${path}`, 404);
     }
-    if (!ALLOWED_SUBPATHS.has(sub)) {
+    if (!ALLOWED_SUBPATHS[sub]) {
       emitBridgeRejectTelemetry({
         sessionKey: "", bridgeSource: "memory-bridge",
         rejectReason: "subpath_forbidden", httpStatus: 403,
@@ -326,6 +375,26 @@ export function createMemoryBridgeHandler(
       ids = await loadSessionIdsL2(bindingRepo, spaceId, sessionKey);
     }
     if (!ids) {
+      const authHeader = (c.req.header("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+      const adminKey = (config.admin?.apiKey || config.superAdmin?.apiKey || "").trim();
+      const headerTeam = (c.req.header("x-tdai-team-id") ?? "").trim();
+      const headerUser = (c.req.header("x-tdai-user-id") ?? "").trim();
+      const headerAgent = (c.req.header("x-tdai-agent-id") ?? "").trim();
+      if (adminKey && authHeader && authHeader === adminKey && headerTeam && headerUser && headerAgent) {
+        ids = {
+          team_id: headerTeam,
+          user_id: headerUser,
+          agent_id: headerAgent,
+          session_id: sessionKey,
+          space_id: spaceId || "default",
+          // 旁路身份需要真实内核 user_key 才能通过 Layer3；admin token 不是
+          // 合法 user_key，直接沿用会让 fixed-asset 等调用 401 并退化为 self-only。
+          user_key: config.admin?.userKey || authHeader,
+          composite_key: `admin:${sessionKey}`,
+        };
+      }
+    }
+    if (!ids) {
       emitBridgeRejectTelemetry({
         sessionKey, bridgeSource: "memory-bridge",
         rejectReason: "session_not_initialized", httpStatus: 401,
@@ -347,7 +416,8 @@ export function createMemoryBridgeHandler(
             rejectReason: "body_not_object", httpStatus: 400,
             executedEndpoint: sub, requestBody: raw.slice(0, 512),
             spaceId: ids.space_id, userId: ids.user_id, teamId: ids.team_id,
-            agentId: ids.agent_id, agentSource: ids.agent_source,
+            agentId: ids.agent_id,
+            agentSource: agentSourceFromSessionKey(ids.composite_key ?? sessionKey),
           });
           return envelope(40001, `${TAG} body must be a JSON object`, 400);
         }
@@ -358,7 +428,8 @@ export function createMemoryBridgeHandler(
         rejectReason: "invalid_json_body", httpStatus: 400,
         executedEndpoint: sub,
         spaceId: ids.space_id, userId: ids.user_id, teamId: ids.team_id,
-        agentId: ids.agent_id, agentSource: ids.agent_source,
+        agentId: ids.agent_id,
+        agentSource: agentSourceFromSessionKey(ids.composite_key ?? sessionKey),
       });
       return envelope(40001, `${TAG} invalid JSON body: ${(err as Error).message}`, 400);
     }
@@ -386,9 +457,15 @@ export function createMemoryBridgeHandler(
       "Content-Type": "application/json",
     };
 
-    const ctxs = await resolveMemoryCtxs(config, ids, sessionKey);
-    // task_id 优先级：caller 显式传 > session 注入。session_id 保持"仅 caller 显式传"，
-    // 因为 search 类希望默认跨 session（agent 维度）；task_id 属于身份维度，仍应强制。
+    // 端点分类决定作用域：读端点可跨来源（仅限已授权 ctx），写端点只能作用于
+    // 调用者自身身份。
+    const isWriteSubpath = WRITE_SUBPATHS[sub] === true;
+    const ctxs = scopeCtxsForEndpoint(
+      await resolveMemoryCtxs(config, ids, sessionKey),
+      isWriteSubpath,
+    );
+    // Search stays cross-session: core treats session_id as a session_key
+    // filter, so only forward it when the caller explicitly supplied one.
     const effectiveTaskId = modelTaskId ?? ids.task_id;
     const makeOutbound = (target: FixedAssetCtx): Record<string, unknown> => ({
       ...inboundBody,
@@ -496,7 +573,21 @@ export function createMemoryBridgeHandler(
 
     let upstream;
     try {
-      upstream = await callUpstream(selectTargetCtx(ctxs, inboundBody.agent_id));
+      const target = selectTargetCtx(ctxs, inboundBody.agent_id);
+      if (!target) {
+        // 写端点被请求指向非自身来源 —— 显式的跨来源修改拒绝。
+        if (isWriteSubpath) {
+          emitBridgeRejectTelemetry({
+            sessionKey: ids.composite_key ?? sessionKey, bridgeSource: "memory-bridge",
+            rejectReason: "cross_source_mutation", httpStatus: 403,
+            executedEndpoint: sub, spaceId: ids.space_id,
+            userId: ids.user_id, teamId: ids.team_id, agentId: ids.agent_id,
+          });
+          return envelope(40304, `${TAG} '${sub}' may only write the caller's own memory`, 403);
+        }
+        return envelope(40303, `${TAG} requested agent memory is not authorized`, 403);
+      }
+      upstream = await callUpstream(target);
     } catch (err) {
       console.warn(
         `${TAG} upstream fetch failed sub=${sub} err=${(err as Error).message}`,

@@ -78,6 +78,10 @@ export async function verifyUserKey(userKey: string, serviceId: string): Promise
       headers: {
         "content-type": "application/json",
         "x-tdai-service-id": serviceId,
+        // Kernel gateway Layer-1 auth. Required whenever the kernel is started
+        // with TDAI_GATEWAY_API_KEY; without it /v3/meta/* returns 401 and every
+        // request is rejected as "auth service returned HTTP 401".
+        ...(config.token ? { authorization: `Bearer ${config.token}` } : {}),
       },
       body: JSON.stringify({ user_key: userKey }),
     };

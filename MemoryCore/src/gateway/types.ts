@@ -38,7 +38,9 @@ export interface HealthResponse {
 export interface RecallRequest {
   query: string;
   session_key: string;
+  team_id?: string;
   user_id?: string;
+  agent_id?: string;
 }
 
 export interface RecallResponse {
@@ -63,7 +65,9 @@ export interface CaptureRequest {
   assistant_content: string;
   session_key: string;
   session_id?: string;
+  team_id?: string;
   user_id?: string;
+  agent_id?: string;
   messages?: unknown[];
 }
 
@@ -81,6 +85,10 @@ export interface MemorySearchRequest {
   limit?: number;
   type?: string;
   scene?: string;
+  team_id?: string;
+  user_id?: string;
+  agent_id?: string;
+  session_id?: string;
 }
 
 export interface MemorySearchResponse {
@@ -97,6 +105,10 @@ export interface ConversationSearchRequest {
   query: string;
   limit?: number;
   session_key?: string;
+  team_id?: string;
+  user_id?: string;
+  agent_id?: string;
+  session_id?: string;
 }
 
 export interface ConversationSearchResponse {

@@ -48,6 +48,7 @@ import {
   collectResponsesToolCalls,
 } from "../../common/responses-payload.js";
 import { isLegacyProxyPath } from "../../routes/whitelist.js";
+import { resolveClientAgentSource, resolveNamedRoute } from "../../namedRoute.js";
 import { verifyUserKey } from "../../auth.js";
 import { stageAuth } from "../stages/auth.js";
 import { stageParseBody } from "../stages/parse-body.js";
@@ -424,7 +425,7 @@ export async function runCodexPipeline(
   // ── 6. Session ID extraction ───────────────────────────────────────────────
   const sessionId = extractCodexSessionId(headers, body);
   const sessionKey = sessionId ?? `${keyId}:${traceId}`;
-  const agentSource = "codex";
+  const agentSource = resolveClientAgentSource(resolveNamedRoute(path, "codex"));
   const isStream = body.stream !== false;
   const sessionTurnSeed = createSessionTurnSeed(config, {
     agent: agentSource,
@@ -716,7 +717,10 @@ export async function runCodexPipeline(
         callerUserKey: callerUserKey ?? undefined,
         isStream, protocol: "responses",
         modelId,
-        upstreamUrl: config.upstream.agents?.["codex"]?.url || config.upstream.url,
+        upstreamUrl:
+          config.upstream.agents?.[agentSource]?.url ||
+          config.upstream.agents?.["codex"]?.url ||
+          config.upstream.url,
         messages: input,
         createTdaiClientFn: createCodexTdaiClient,
         bodyMessages: extractSimpleMessages(input),
@@ -1004,7 +1008,8 @@ async function forwardToUpstream(
   // 对齐 anthropicHandler.ts:1029 的解析姿势。codex 通常需要单独指向支持
   // Responses API 的兼容层——部分 OpenAI 兼容上游只实现
   // messages/chat_completions，不支持 /responses，此处允许按 agent 覆盖。
-  const agentUpstreamEntry = config.upstream.agents?.["codex"];
+  const routeName = resolveNamedRoute(c.req.path, "codex");
+  const agentUpstreamEntry = config.upstream.agents?.[routeName];
   let upstreamBase = agentUpstreamEntry?.url || config.upstream.url;
   let upstreamUrl = joinUrl(upstreamBase, c.req.path);
   const upstreamHeaders = buildUpstreamHeaders(c, config);

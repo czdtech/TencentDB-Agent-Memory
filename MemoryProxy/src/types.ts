@@ -295,6 +295,8 @@ export interface SessionInitConfig {
    * 默认 false（保持原有行为，弹 asset_confirm 对话框）。
    */
   skipAssetConfirm?: boolean;
+  /** Per-route preset identity (keyed by first URL path segment / upstream.agents name). */
+  routeIdentities?: Record<string, { team_id: string; agent_id: string; task_id?: string }>;
   headerAutoSelect?: {
     /** 是否启用 header 自动预选。默认 true。 */
     enabled: boolean;
@@ -307,6 +309,19 @@ export interface SessionInitConfig {
     /** header 值在用户可见列表中查不到时：'form' 回退交互表单（默认）| 'bypass' 直接跳过 session init。 */
     onMismatch: "form" | "bypass";
   };
+}
+export interface MemorySuperAdminSource {
+  team_id: string;
+  user_id: string;
+  agent_id: string;
+  name?: string;
+}
+
+export interface MemorySuperAdminConfig {
+  enabled: boolean;
+  team_id: string;
+  apiKey: string;
+  sources: MemorySuperAdminSource[];
 }
 
 export interface TdaiConfig {
@@ -556,6 +571,8 @@ export interface AgentUpstreamEntry {
    * that fallback only applies when this agent has no entry at all.
    */
   apiKey?: string;
+  /** Use the global upstream apiKey while keeping this route explicit. */
+  inheritApiKey?: boolean;
 }
 
 /** Top-level proxy configuration (merged from config file + CLI args). */
@@ -620,6 +637,8 @@ export interface ProxyConfig {
   injection: InjectionConfig;
   extraction: ExtractionConfig;
   sessionInit: SessionInitConfig;
+  superAdmin: MemorySuperAdminConfig;
+
   tdai: TdaiConfig;
   coreSkill: CoreSkillConfig;
   instanceUpstream: InstanceUpstreamConfig;
@@ -653,6 +672,14 @@ export interface ProxyConfig {
    */
   admin: {
     apiKey: string;
+    /**
+     * 运维旁路（admin token 直连）时代表调用方的内核 user_key（`x-tdai-user-key`）。
+     * 用于需要以真实用户身份向内核发起的调用（如 L3 fixed-asset 聚合）。
+     * 留空则退回用 admin token 充当，内核会以 `invalid_user_key` 拒绝。
+     *
+     * env 覆盖：`TDAI_ADMIN_USER_KEY`。
+     */
+    userKey: string;
   };
   /**
    * `mem:` 特殊命令配置。
@@ -807,6 +834,12 @@ export interface AuthConfig {
   enabled: boolean;
   /** Auth service base URL (e.g. http://kernel.example.com:8420). */
   url: string;
+  /**
+   * Kernel gateway service token, sent as `Authorization: Bearer <token>`.
+   * Required when the kernel runs with `TDAI_GATEWAY_API_KEY` set — the
+   * gateway rejects unauthenticated `/v3/meta/*` calls with 401.
+   */
+  token: string;
   /** Request timeout in ms. Default: 5000. */
   timeoutMs: number;
 }
@@ -847,6 +880,10 @@ export interface SystemUserEntry {
 
 /** Credit usage reporting to external service (e.g. TDAI MemoryPlus). */
 export interface CreditReportConfig {
+  /** When explicitly false, credit reporting is skipped entirely.
+   *  For self-hosted / personal deployments with no billing gateway.
+   *  Defaults to true (report) when unset. */
+  enabled?: boolean;
   /** POST endpoint URL. */
   url: string;
   /** Request timeout in ms. */
@@ -1048,7 +1085,7 @@ export interface RawYamlConfig {
     flushAt?: number;
     flushInterval?: number;
   };
-  creditReport?: { url?: string; timeoutMs?: number };
+  creditReport?: { enabled?: boolean; url?: string; timeoutMs?: number };
   creditPricing?: {
     models?: (Partial<CreditPricingEntry> & {
       tiers?: Partial<PricingTier>[];
@@ -1079,6 +1116,7 @@ export interface RawYamlConfig {
     injectAgentContext?: boolean;
     injectTaskContext?: boolean;
     defaultTaskId?: string;
+    routeIdentities?: SessionInitConfig["routeIdentities"];
     /** 一步到位: 预选 team/agent 都命中时, 跳过 asset_confirm 直接 initialized。 */
     skipAssetConfirm?: boolean;
     debugForceIdentity?: {
@@ -1095,6 +1133,12 @@ export interface RawYamlConfig {
       taskHeader?: string;
       onMismatch?: "form" | "bypass";
     };
+  };
+  superAdmin?: {
+    enabled?: boolean;
+    team_id?: string;
+    apiKey?: string;
+    sources?: MemorySuperAdminSource[];
   };
   tdai?: {
     enabled?: boolean;
@@ -1124,11 +1168,14 @@ export interface RawYamlConfig {
   auth?: {
     enabled?: boolean;
     url?: string;
+    /** Kernel gateway service token (Bearer). */
+    token?: string;
     timeoutMs?: number;
   };
   systemUsers?: Partial<SystemUserEntry>[];
   admin?: {
     apiKey?: string;
+    userKey?: string;
   };
   /**
    * mem: 命令族配置（含 create-task / update-task 的 LLM 草稿生成器）。

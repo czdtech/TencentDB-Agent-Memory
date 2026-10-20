@@ -36,8 +36,7 @@ RUN if [ "$APT_MIRROR" != "deb.debian.org" ]; then \
 
 # Native build toolchain (sqlite-vec, @node-rs/jieba etc.)
 # 使用 BuildKit cache mount 缓存 apt 包，避免重复下载
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+RUN \
     apt-get update && apt-get install -y --no-install-recommends \
         python3 \
         make \
@@ -79,7 +78,7 @@ RUN node -e " \
 # --ignore-scripts skips the openclaw postinstall patch (irrelevant in image).
 # --legacy-peer-deps relaxes strict peer resolution for older transitive deps.
 # 使用 BuildKit cache mount 缓存 npm 下载缓存，大幅加速重复构建
-RUN --mount=type=cache,id=npm-cache,target=/root/.npm \
+RUN \
     npm install \
         --omit=dev \
         --omit=optional \
@@ -96,7 +95,7 @@ RUN --mount=type=cache,id=npm-cache,target=/root/.npm \
 # （@esbuild/linux-x64 / @esbuild/linux-arm64）本身就是 optionalDependency，
 # 加了会导致运行时报 "The package @esbuild/linux-x64 could not be found"。
 # 允许 dev 也不影响：esbuild 本身没有 devDep。
-RUN --mount=type=cache,id=npm-cache,target=/root/.npm \
+RUN \
     npm install \
         --no-save \
         --ignore-scripts \
@@ -124,8 +123,7 @@ RUN if [ "$APT_MIRROR" != "deb.debian.org" ]; then \
     fi
 
 # Runtime essentials only (curl for HEALTHCHECK; tini for proper signal handling)
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+RUN \
     apt-get update && apt-get install -y --no-install-recommends \
         curl \
         tini \

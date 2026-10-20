@@ -456,15 +456,19 @@ export class StorePool {
     // Embedding service (远端 API, 如 OpenAI text-embedding)
     let embeddingService: EmbeddingService | undefined;
     const embCfg = this.memoryCfg.embedding;
-    if (embCfg.enabled && embCfg.provider !== "local" && embCfg.provider !== "none" && embCfg.apiKey) {
-      embeddingService = createEmbeddingService({
-        provider: embCfg.provider,
-        baseUrl: embCfg.baseUrl,
-        apiKey: embCfg.apiKey,
-        model: embCfg.model,
-        dimensions: embCfg.dimensions,
-        maxInputChars: embCfg.maxInputChars,
-      }, this.logger as StoreLogger);
+    if (embCfg.enabled && embCfg.provider !== "none") {
+      if (embCfg.provider === "local") {
+        embeddingService = createEmbeddingService({ provider: "local", modelCacheDir: embCfg.modelCacheDir }, this.logger as StoreLogger);
+      } else if (embCfg.apiKey) {
+        embeddingService = createEmbeddingService({
+          provider: embCfg.provider,
+          baseUrl: embCfg.baseUrl,
+          apiKey: embCfg.apiKey,
+          model: embCfg.model,
+          dimensions: embCfg.dimensions,
+          maxInputChars: embCfg.maxInputChars,
+        }, this.logger as StoreLogger);
+      }
     }
 
     const dims = embCfg.dimensions ?? 0;

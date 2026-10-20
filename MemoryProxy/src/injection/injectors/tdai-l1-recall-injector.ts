@@ -4,7 +4,7 @@ import { getLastUserMessage, getMessageText } from "../context.js";
 import type { TdaiClient } from "../../tdai/client.js";
 import { getTdaiIdentity } from "../../tdai/identity.js";
 import { extractUserQueryText } from "../../tdai/recorder.js";
-import type { CoreSkillConfig } from "../../types.js";
+import type { CoreSkillConfig, MemorySuperAdminConfig } from "../../types.js";
 import { getMetadataClient } from "../../meta/client.js";
 import { resolveFixedAssetCtxs } from "./tdai-fixed-asset.js";
 
@@ -36,10 +36,16 @@ export class TdaiL1RecallInjector implements InjectionHook {
     private perAgentLimit: number | undefined = undefined,
     private globalTopK = 5,
     /**
-     * ACL 校验客户端，通常与 `client` 是同一个 TdaiClient 实例。传入后每个
-     * fixed-asset ctx 都会走 acl/check(read) 过滤。为 null 时保留旧行为。
+     * ACL 校验客户端，通常与 `client` 是同一个 TdaiClient 实例。传给共享
+     * resolver 后，每个同 team 借入来源都会走 acl/check(read) 过滤；为 null
+     * 时借入来源一律不注入（fail-closed）。
      */
     private aclClient: TdaiClient | null = null,
+    /**
+     * Cloud super-admin config（YAML `superAdmin:`）。只有配置的超管 team 会拿到
+     * 跨 team 的显式 sources，其余 team 保持 self + 同 team 授权资产。
+     */
+    private superAdmin: MemorySuperAdminConfig | undefined = undefined,
   ) {}
 
   async execute(ctx: AgentContext): Promise<ContextBlock[]> {
@@ -54,7 +60,7 @@ export class TdaiL1RecallInjector implements InjectionHook {
     const query = extractUserQueryText(getMessageText(lastUser)).trim().slice(0, 2048);
     if (!query) return [];
 
-    // 拿 self + 借入 ≤2 个的 ctx 列表
+    // Retrieval uses every visible source. globalTopK caps only the injected text.
     const session = (ctx.metadata.custom as any)?.session as { user_key?: string; space_id?: string } | undefined;
     const userKey = session?.user_key;
     // spaceId 来自 session 注册时保存的 URL path 中的 `/proxy/<spaceId>/...`；
@@ -63,7 +69,7 @@ export class TdaiL1RecallInjector implements InjectionHook {
     const mc = this.coreSkillCfg && userKey
       ? getMetadataClient(this.coreSkillCfg, spaceId, userKey)
       : null;
-    const ctxs = await resolveFixedAssetCtxs(ctx, identity, mc);
+    const ctxs = await resolveFixedAssetCtxs(ctx, identity, mc, this.superAdmin, this.aclClient);
 
     // 并发对每个 ctx search L1
     const groups = await Promise.all(
@@ -112,7 +118,9 @@ export class TdaiL1RecallInjector implements InjectionHook {
         metadata: {
           source: this.id,
           count: merged.length,
-          sources: ctxs.map((c) => c.agentId),
+          sources_searched: ctxs.map((c) => c.agentId),
+          injection_cap: this.globalTopK,
+          injected_count: merged.length,
         },
       },
     ];

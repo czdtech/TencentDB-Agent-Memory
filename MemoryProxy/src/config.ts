@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { load as yamlLoad } from "js-yaml";
 import type {
   CostGuardConfig,
+  MemorySuperAdminConfig,
   ProxyConfig,
   RawSelectionYaml,
   RawSkillSelectionYaml,
@@ -153,6 +154,8 @@ export const DEFAULT_CONFIG: ProxyConfig = {
     // debugForceIdentity intentionally omitted — must be explicitly set in yaml
     // to activate the bypass path.
   },
+  superAdmin: { enabled: false, team_id: "", apiKey: "", sources: [] },
+
   tdai: {
     enabled: false,
     endpoint: "",
@@ -193,10 +196,11 @@ export const DEFAULT_CONFIG: ProxyConfig = {
   auth: {
     enabled: false,
     url: "",
+    token: "",
     timeoutMs: 5000,
   },
   systemUsers: [],
-  admin: { apiKey: "" },
+  admin: { apiKey: "", userKey: "" },
   memCommand: {},
   ccRequestRouting: { enabled: true },
   workbuddyRequestRouting: { enabled: true },
@@ -309,21 +313,57 @@ function parseHeaderMap(raw: unknown): Record<string, string> | undefined {
  * noise (and would make "did I configure this right?" harder to answer at
  * a glance).
  */
+function nonEmptyEnv(name: string): string | undefined {
+  const raw = process.env[name];
+  return raw && raw.trim().length > 0 ? raw.trim() : undefined;
+}
+
 function parseUpstreamAgents(
-  raw: Record<string, { url?: string; apiKey?: string } | null | undefined> | undefined,
-): Record<string, { url: string; apiKey?: string }> {
-  if (!raw || typeof raw !== "object") return {};
-  const out: Record<string, { url: string; apiKey?: string }> = {};
+  raw: Record<string, { url?: string; apiKey?: string; inheritApiKey?: boolean } | null | undefined> | undefined,
+): Record<string, { url: string; apiKey?: string; inheritApiKey?: boolean }> {
+  if (!raw) return {};
+  const out: Record<string, { url: string; apiKey?: string; inheritApiKey?: boolean }> = {};
   for (const [name, entry] of Object.entries(raw)) {
-    if (!entry || typeof entry !== "object") continue;
-    const url = (entry as { url?: unknown }).url;
+    if (!entry) continue;
+    const url = entry.url;
     if (typeof url !== "string" || url.length === 0) continue;
-    const apiKey = (entry as { apiKey?: unknown }).apiKey;
-    out[name] = typeof apiKey === "string" && apiKey.length > 0
-      ? { url, apiKey }
-      : { url };
+    // `${VAR}` 展开，让 yaml 只保留占位符、真实 key 留在 Railway 变量里。
+    const apiKey = entry.apiKey ? expandEnv(entry.apiKey).trim() : "";
+    const inheritApiKey = entry.inheritApiKey === true;
+    out[name] = apiKey
+      ? { url, apiKey, ...(inheritApiKey ? { inheritApiKey: true } : {}) }
+      : { url, ...(inheritApiKey ? { inheritApiKey: true } : {}) };
   }
   return out;
+}
+
+function parseSuperAdmin(raw: RawYamlConfig["superAdmin"] | undefined): MemorySuperAdminConfig {
+  const envEnabled = process.env.TDAI_SUPERADMIN_ENABLED;
+  const enabled = envEnabled !== undefined
+    ? envEnabled.trim().toLowerCase() === "true"
+    : raw?.enabled ?? false;
+  const team_id = (process.env.TDAI_SUPERADMIN_TEAM_ID ?? raw?.team_id ?? "").trim();
+  const apiKey = (process.env.TDAI_PROXY_ADMIN_API_KEY ?? resolveSecret(raw?.apiKey) ?? "").trim();
+  let sources = raw?.sources ?? [];
+  const sourceJson = process.env.TDAI_SUPERADMIN_SOURCES_JSON;
+  if (sourceJson?.trim()) {
+    try {
+      const parsed = JSON.parse(sourceJson);
+      if (Array.isArray(parsed)) sources = parsed;
+    } catch {
+      console.warn("[config] invalid TDAI_SUPERADMIN_SOURCES_JSON; using YAML sources");
+    }
+  }
+  return {
+    enabled: Boolean(enabled && team_id),
+    team_id,
+    apiKey,
+    sources: sources.filter((source) =>
+      typeof source?.team_id === "string" &&
+      typeof source?.user_id === "string" &&
+      typeof source?.agent_id === "string",
+    ),
+  };
 }
 
 /**
@@ -349,12 +389,15 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
     upstream: {
       url:
         overrides.upstreamUrl ??
+        nonEmptyEnv("PROXY_UPSTREAM_URL") ??
         yaml.upstream?.url ??
         DEFAULT_CONFIG.upstream.url,
       // TDAI_PROXY_UPSTREAM_API_KEY_FILE keeps the key out of the YAML and the environment.
       apiKey:
         readKeyFile(process.env.TDAI_PROXY_UPSTREAM_API_KEY_FILE) ||
-        (yaml.upstream?.apiKey ?? DEFAULT_CONFIG.upstream.apiKey),
+        (nonEmptyEnv("PROXY_UPSTREAM_API_KEY") ??
+          resolveSecret(yaml.upstream?.apiKey) ??
+          DEFAULT_CONFIG.upstream.apiKey),
       agents: parseUpstreamAgents(yaml.upstream?.agents),
     },
     log: {
@@ -446,6 +489,7 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
     },
     costGuard: parseCostGuard(yaml),
     creditReport: {
+      enabled: yaml.creditReport?.enabled ?? true,
       url: yaml.creditReport?.url ?? DEFAULT_CONFIG.creditReport.url,
       timeoutMs: yaml.creditReport?.timeoutMs ?? DEFAULT_CONFIG.creditReport.timeoutMs,
     },
@@ -528,6 +572,7 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
       ? (yaml.sessionInit.defaultTaskId.trim() || undefined)   // empty string → disabled
       : DEFAULT_CONFIG.sessionInit.defaultTaskId,
     skipAssetConfirm: yaml.sessionInit?.skipAssetConfirm ?? DEFAULT_CONFIG.sessionInit.skipAssetConfirm,
+    routeIdentities: yaml.sessionInit?.routeIdentities ?? {},
     headerAutoSelect: {
       enabled: yaml.sessionInit?.headerAutoSelect?.enabled ?? DEFAULT_CONFIG.sessionInit.headerAutoSelect!.enabled,
       teamHeader: (yaml.sessionInit?.headerAutoSelect?.teamHeader ?? DEFAULT_CONFIG.sessionInit.headerAutoSelect!.teamHeader).toLowerCase(),
@@ -553,10 +598,12 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
       : undefined,
     debugVerboseLogging: yaml.sessionInit?.debugVerboseLogging ?? false,
   },
+    superAdmin: parseSuperAdmin(yaml.superAdmin),
+
     tdai: {
       enabled: yaml.tdai?.enabled ?? DEFAULT_CONFIG.tdai.enabled,
       endpoint: yaml.tdai?.endpoint ?? DEFAULT_CONFIG.tdai.endpoint,
-      apiKey: yaml.tdai?.apiKey ?? DEFAULT_CONFIG.tdai.apiKey,
+      apiKey: resolveSecret(yaml.tdai?.apiKey) ?? DEFAULT_CONFIG.tdai.apiKey,
       serviceId: yaml.tdai?.serviceId ?? DEFAULT_CONFIG.tdai.serviceId,
       memory: {
         enabled: yaml.tdai?.memory?.enabled ?? DEFAULT_CONFIG.tdai.memory.enabled,
@@ -575,7 +622,7 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
     // new name in config.example.yaml. When both are present, `skill:` wins.
     coreSkill: {
       endpoint: yaml.skill?.endpoint ?? yaml.coreSkill?.endpoint ?? DEFAULT_CONFIG.coreSkill.endpoint,
-      serviceToken: yaml.skill?.serviceToken ?? yaml.coreSkill?.serviceToken ?? DEFAULT_CONFIG.coreSkill.serviceToken,
+      serviceToken: resolveSecret(yaml.skill?.serviceToken) ?? resolveSecret(yaml.coreSkill?.serviceToken) ?? DEFAULT_CONFIG.coreSkill.serviceToken,
       serviceId: yaml.skill?.serviceId ?? yaml.coreSkill?.serviceId ?? DEFAULT_CONFIG.coreSkill.serviceId,
       timeoutMs: yaml.skill?.timeoutMs ?? yaml.coreSkill?.timeoutMs ?? DEFAULT_CONFIG.coreSkill.timeoutMs,
     },
@@ -586,7 +633,7 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
     knowledge: {
       enabled: yaml.knowledge?.enabled ?? DEFAULT_CONFIG.knowledge.enabled,
       endpoint: yaml.knowledge?.endpoint ?? DEFAULT_CONFIG.knowledge.endpoint,
-      serviceToken: yaml.knowledge?.serviceToken ?? DEFAULT_CONFIG.knowledge.serviceToken,
+      serviceToken: resolveSecret(yaml.knowledge?.serviceToken) ?? DEFAULT_CONFIG.knowledge.serviceToken,
       serviceId: yaml.knowledge?.serviceId ?? DEFAULT_CONFIG.knowledge.serviceId,
       timeoutMs: yaml.knowledge?.timeoutMs ?? DEFAULT_CONFIG.knowledge.timeoutMs,
     },
@@ -600,6 +647,15 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
     auth: {
       enabled: yaml.auth?.enabled ?? DEFAULT_CONFIG.auth.enabled,
       url: yaml.auth?.url ?? DEFAULT_CONFIG.auth.url,
+      // Kernel gateway service token. Falls back to the TDAI service token so a
+      // single baked key covers every kernel call path; empty means the kernel
+      // runs without TDAI_GATEWAY_API_KEY and needs no Bearer.
+      token:
+        nonEmptyEnv("TDAI_GATEWAY_API_KEY") ??
+        resolveSecret(yaml.auth?.token) ??
+        resolveSecret(yaml.tdai?.apiKey) ??
+        resolveSecret(yaml.skill?.serviceToken) ??
+        DEFAULT_CONFIG.auth.token,
       timeoutMs: yaml.auth?.timeoutMs ?? DEFAULT_CONFIG.auth.timeoutMs,
     },
     // Entries without a non-empty userId are silently dropped — matching is
@@ -623,8 +679,13 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
       // 的运维习惯对齐；空字符串表示鉴权关闭（默认公开可访问，启动时告警）。
       apiKey:
         (process.env.TDAI_PROXY_ADMIN_API_KEY ?? "").trim() ||
-        yaml.admin?.apiKey ||
+        resolveSecret(yaml.admin?.apiKey) ||
         DEFAULT_CONFIG.admin.apiKey,
+      // 运维旁路代表的内核 user_key；留空时旁路退回用 admin token（内核会拒绝）。
+      userKey:
+        (process.env.TDAI_ADMIN_USER_KEY ?? "").trim() ||
+        resolveSecret(yaml.admin?.userKey) ||
+        DEFAULT_CONFIG.admin.userKey,
     },
     memCommand: {
       // taskDraft 是可选段。仅当 yaml 里显式提供时才注入 —— 未配置时字段缺席，
@@ -824,9 +885,8 @@ export function buildSkillSelectionConfig(raw: RawSkillSelectionYaml | undefined
  * Expand `${VAR}` / `${VAR:-default}` references in a string using
  * `process.env`. Missing vars with no default become an empty string.
  *
- * Deliberately scoped narrowly (only called from `systemUsers` today) to
- * avoid changing the semantics of other fields where a literal `${...}`
- * might already be in use (regex-adjacent config, prompts, etc).
+ * Applied to every credential field (see `resolveSecret`) so a committed yaml
+ * can hold placeholders while the real values stay in the deployment env.
  */
 function expandEnv(input: string): string {
   return input.replace(/\$\{([A-Z_][A-Z0-9_]*)(?::-([^}]*))?\}/gi, (_m, name: string, def?: string) => {
@@ -834,6 +894,15 @@ function expandEnv(input: string): string {
     if (val !== undefined && val !== "") return val;
     return def ?? "";
   });
+}
+
+/**
+ * Resolve a credential field from yaml: expand `${VAR}` then treat an empty
+ * result as "not configured" so the `??` fallback chain keeps working.
+ */
+function resolveSecret(raw: string | undefined): string | undefined {
+  const value = expandEnv(raw ?? "").trim();
+  return value.length > 0 ? value : undefined;
 }
 
 /** Parse process.argv into CliOverrides (minimal arg parser, no extra deps). */

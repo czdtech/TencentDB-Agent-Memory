@@ -81,20 +81,30 @@ function isCodexAuxiliary(
 function extractCodexUserText(input: unknown): string | null {
   if (!Array.isArray(input)) return null;
 
-  // 从后往前找最后一条 role=user 的 message
+  // 从后往前找最后一条 role=user 的 message。
+  // 支持 Codex CLI 展开格式（type=message + content[].input_text），也支持
+  // OpenAI Responses 合法简写（省略 type，content 为 string 或 text blocks）。
   for (let i = input.length - 1; i >= 0; i--) {
     const item = input[i] as Record<string, unknown> | null | undefined;
     if (!item || typeof item !== "object") continue;
-    if (item.type !== "message" || item.role !== "user") continue;
+    if (item.role !== "user") continue;
+    if (item.type !== undefined && item.type !== "message") continue;
 
     const content = item.content;
+    if (typeof content === "string") {
+      return content.trim() ? content : null;
+    }
     if (!Array.isArray(content)) continue;
 
     const texts: string[] = [];
     for (const block of content) {
+      if (typeof block === "string") {
+        if (block) texts.push(block);
+        continue;
+      }
       const b = block as Record<string, unknown> | null | undefined;
       if (!b || typeof b !== "object") continue;
-      if (b.type === "input_text" && typeof b.text === "string") {
+      if (["input_text", "text"].includes(String(b.type ?? "")) && typeof b.text === "string") {
         texts.push(b.text);
       }
     }

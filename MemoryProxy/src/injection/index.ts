@@ -405,7 +405,7 @@ function buildPipelineBundle(config: ProxyConfig): PipelineBundle {
     // fixed-asset-agents（self + 借入≤2）通过内核 MetadataClient 获取；
     // 内核不可达时 injector 自动降级为"只查当前 agent 的记忆"。
     if (config.tdai.memory.injectL2L3) {
-      registry.register(new TdaiProfileMemoryInjector(tdaiBaseConfig, config.coreSkill));
+      registry.register(new TdaiProfileMemoryInjector(tdaiBaseConfig, config.coreSkill, config.superAdmin));
     }
     // 注意：L0/L1 不再每轮自动召回注入到 user prompt（会破坏 KV/prompt cache）。
     // 改为只在 system prompt 暴露只读工具（见 TdaiToolsInjector），借助 system

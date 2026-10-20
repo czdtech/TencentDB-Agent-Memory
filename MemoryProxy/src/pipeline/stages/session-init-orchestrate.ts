@@ -138,7 +138,7 @@ export interface SessionInitOrchestrateResult {
 export async function stageSessionInitOrchestrate(
   input: SessionInitOrchestrateInput,
 ): Promise<SessionInitOrchestrateResult> {
-  const { getSessionStore, handleSessionInit, parsePresetIdentity } = await import(
+  const { getSessionStore, handleSessionInit, parsePresetIdentity, parseRouteIdentity } = await import(
     "../../session/index.js"
   );
   const { getMetadataClient } = await import("../../meta/client.js");
@@ -149,7 +149,11 @@ export async function stageSessionInitOrchestrate(
     input.spaceId ?? "",
     input.kernelUserKey,
   );
-  const presetIdentity: PresetIdentity = parsePresetIdentity(input.config.sessionInit, input.headers) ?? {};
+  // 请求头身份优先，路由预设只兜给发不出身份头的客户端（如 DSH 幕僚长）。
+  const presetIdentity: PresetIdentity =
+    parsePresetIdentity(input.config.sessionInit, input.headers) ??
+    parseRouteIdentity(input.config.sessionInit, input.agentSourceForState) ??
+    {};
 
   const compositeKey = input.compositeKeyOverride ?? `${input.agentSourceForState}:${input.sessionKey}`;
   const identity = {

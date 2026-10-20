@@ -71,6 +71,23 @@ Skill 与 Knowledge 沿用同样的思路：
 - `<knowledge_tools>` —— 团队知识资源（Wiki / CodeGraph）两步自发现工具
 - `<session_context>` —— session init 完成后每轮追加的 agent/task 信息
 
+### 记忆可见范围与跨来源写保护
+
+可见来源由配置显式决定，自动注入（L2/L3）与显式检索（`/memory-bridge/v3/atomic/search`、`conversation/search`）共用同一份判定：
+
+- 普通身份：`self` + 同 team 的 chat_memory 绑定；每个借入来源都要通过 MemoryCore `acl/check(read)`，校验失败或拿不到 caller `user_key` 时该来源不参与注入与检索。
+- 配置的超管 team（`superAdmin.team_id`）：`self` + `superAdmin.sources` 里逐条声明的来源，每条保留自己的 `team_id` / `user_id` / `agent_id` / `name`。配置了 `sources` 不会让普通身份获得跨 team 可见性 —— 只有 `superAdmin.team_id` 自己能用这份列表。
+- 检索结果保留来源信息：每条命中带 `source_agent_id` / `source_agent_name` / `source_agent_role`（`self` | `imported_from`），并在 `searched_agents` 里回列本次检索覆盖的来源；自动注入侧按 `<agent name=... role="self|imported_from" agent_id=...>` 分段。
+
+`/memory-bridge/v3/*` 按**真实端点语义**分类（不靠名字里有没有 `search`）：
+
+| 类别 | 端点 | 作用域 |
+| --- | --- | --- |
+| 读 | `atomic/search`、`atomic/query`、`conversation/search`、`conversation/query`、`scenario/ls`、`scenario/read` | 已授权来源（超管含配置 `sources`） |
+| 写 | `conversation/add` | 仅调用者自身 `(team, user, agent)` |
+
+写端点被指向其他来源（例如 body 里传借入来源的 `agent_id`）时返回 HTTP `403`、`code=40304`，且不会转发到 MemoryCore；超管身份同样不能借配置来源写别人的记忆，写自己的记忆不受影响。其余 `write` / `rm` / `update` / `delete` 端点一律不开放，写入走主链路。
+
 ## 环境要求
 
 - Node.js `v22.x`（启动时强校验；推荐 `>= 22.16.0`）
@@ -217,6 +234,7 @@ Anthropic Messages 客户端：
 | `injection` | 上下文注入总开关与 injector 列表（`skill` / `knowledge` / `tdai-memory`） |
 | `extraction` | 对话回流总开关（skill 归档 + L0 写入） |
 | `sessionInit` | 会话初始化表单流程、header 自动预选策略 |
+| `superAdmin` | 云端超管 team 与显式跨 team 来源（`sources`）；同时控制自动注入与 `/memory-bridge` 检索的可见范围 |
 | `tdai` | MemoryCore 连接与 L0/L1/L2/L3 开关 |
 | `skill` | MemoryCore 数据面配置（Skill RAG、Skill 归档、Meta） |
 | `knowledge` | 独立的 knowledge gateway（可与 skill 不同） |
@@ -233,7 +251,10 @@ Anthropic Messages 客户端：
 ```bash
 TDAI_MEMORY_SYSTEM_USER_ID   # memory 内部服务账号 user_id
 TDAI_MEMORY_SYSTEM_USER_KEY  # memory 内部服务账号 apiKey（仅供运维查看）
-TDAI_PROXY_ADMIN_API_KEY     # 运维端点鉴权 shared secret
+TDAI_PROXY_ADMIN_API_KEY     # 运维端点鉴权 shared secret（也是 superAdmin.apiKey 的 env 覆盖）
+TDAI_SUPERADMIN_ENABLED      # 覆盖 superAdmin.enabled
+TDAI_SUPERADMIN_TEAM_ID      # 覆盖 superAdmin.team_id
+TDAI_SUPERADMIN_SOURCES_JSON # JSON 数组，覆盖 YAML 的 superAdmin.sources（每项 team_id/user_id/agent_id/name）
 PROXY_DB_PATH                # sqlite 后端 db 路径（storage.sqlite.dbPath 未配时使用）
 ```
 

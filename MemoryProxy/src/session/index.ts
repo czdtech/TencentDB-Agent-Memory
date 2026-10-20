@@ -29,7 +29,7 @@ export type {
 
 export { buildSessionInfo } from "./registrar.js";
 export { injectSessionContext, SESSION_CONTEXT_OPEN, SESSION_CONTEXT_CLOSE } from "./context-injector.js";
-export { parsePresetIdentity, resolvePresetIdentity } from "./preset.js";
+export { parsePresetIdentity, parseRouteIdentity, resolvePresetIdentity } from "./preset.js";
 export type { PresetIdentity, PresetResolution } from "./preset.js";
 
 // ── CodeBuddy 专属模块 ─────────────────────────────────────────────────────────

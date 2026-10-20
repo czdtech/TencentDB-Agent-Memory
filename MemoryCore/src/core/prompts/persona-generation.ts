@@ -14,6 +14,8 @@ export interface PersonaPromptParams {
   promptMode?: MemoryPromptMode;
   currentTime: string;
   totalProcessed: number;
+  /** Authoritative L1 memory count for the active isolation scope. */
+  memoryCount?: number;
   sceneCount: number;
   changedSceneCount: number;
   changedScenesContent: string;
@@ -273,6 +275,7 @@ export function buildPersonaPrompt(params: PersonaPromptParams): PersonaPromptRe
     promptMode = "chat",
     currentTime,
     totalProcessed,
+    memoryCount,
     sceneCount,
     changedSceneCount,
     changedScenesContent,
@@ -312,7 +315,7 @@ export function buildPersonaPrompt(params: PersonaPromptParams): PersonaPromptRe
 **模式**: ${modeLabel}
 ${triggerSection}
 ## 📊 统计
-- **总记忆数**: ${totalProcessed} 条
+- **总记忆数**: ${memoryCount ?? totalProcessed} 条
 - **场景总数**: ${sceneCount} 个
 - **变化场景**: ${changedSceneCount} 个（自上次更新后）
 

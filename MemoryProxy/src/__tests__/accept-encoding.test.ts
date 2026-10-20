@@ -85,7 +85,10 @@ describe("copyUpstreamRequestHeaders", () => {
 });
 
 describe("runner upstream header builders", () => {
-  const config = { upstream: { apiKey: "server-upstream-key" } } as never;
+  const config = {
+    upstream: { apiKey: "server-upstream-key" },
+    costGuard: { anthropicUpstream: undefined },
+  } as never;
 
   it("openai-chat forces identity on primary and retry headers", () => {
     const primary = buildOpenAiUpstreamHeaders(makeContext(), config, {} as never, undefined, "");

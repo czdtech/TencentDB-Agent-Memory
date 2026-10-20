@@ -106,7 +106,7 @@ import { hasExplicitAgentName, requireWecomIdentity } from "../../wecom-identity
 // ── Handler-level constants ──────────────────────────────────────────────────
 
 // SKIP header sets 已合并到 common/constants.ts (workbuddy 用 WITH_INTERNAL 版本)
-import { SKIP_REQUEST_HEADERS_WITH_INTERNAL as SKIP_REQUEST_HEADERS, filterResponseHeaders } from "../../common/constants.js";
+import { SKIP_REQUEST_HEADERS_WITH_INTERNAL as SKIP_REQUEST_HEADERS, copyUpstreamRequestHeaders, filterResponseHeaders } from "../../common/constants.js";
 
 // ── Types (exported for unit tests) ──────────────────────────────────────────
 
@@ -445,11 +445,8 @@ function buildWorkbuddyLangfuseInput(body: Record<string, unknown>): unknown {
   return hasInput ? body.input : { instructions: body.instructions };
 }
 
-function buildUpstreamHeaders(c: Context, config: ProxyConfig): Record<string, string> {
-  const h: Record<string, string> = {};
-  for (const [k, v] of c.req.raw.headers.entries()) {
-    if (!SKIP_REQUEST_HEADERS.has(k.toLowerCase())) h[k] = v;
-  }
+export function buildUpstreamHeaders(c: Context, config: ProxyConfig): Record<string, string> {
+  const h = copyUpstreamRequestHeaders(c.req.raw.headers, SKIP_REQUEST_HEADERS);
   if (config.upstream.apiKey) {
     h["authorization"] = `Bearer ${config.upstream.apiKey}`;
     delete h["x-api-key"];

@@ -29,19 +29,14 @@ import {
   getInstanceUpstreamConfigs,
   resolveForAgent,
 } from "../../instance-upstream-cache.js";
-import { SKIP_REQUEST_HEADERS_WITH_INTERNAL, SKIP_RESPONSE_HEADERS, filterResponseHeaders } from "../../common/constants.js";
+import { SKIP_REQUEST_HEADERS_WITH_INTERNAL, SKIP_RESPONSE_HEADERS, copyUpstreamRequestHeaders, filterResponseHeaders } from "../../common/constants.js";
 
-function buildAuxUpstreamHeaders(
+export function buildAuxUpstreamHeaders(
   c: Context,
   config: ProxyConfig,
   entry: WhitelistEndpoint,
 ): Record<string, string> {
-  const headers: Record<string, string> = {};
-  for (const [k, v] of c.req.raw.headers.entries()) {
-    if (!SKIP_REQUEST_HEADERS_WITH_INTERNAL.has(k.toLowerCase())) {
-      headers[k] = v;
-    }
-  }
+  const headers = copyUpstreamRequestHeaders(c.req.raw.headers, SKIP_REQUEST_HEADERS_WITH_INTERNAL);
   headers["content-type"] = headers["content-type"] ?? "application/json";
 
   if (config.upstream.apiKey) {

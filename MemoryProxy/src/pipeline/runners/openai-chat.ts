@@ -240,7 +240,7 @@ export function flattenMessagesForOpik(messages: unknown[]): unknown[] {
 // SKIP header sets 已合并到 common/constants.ts
 // handler.ts 老行为: HOP_BY_HOP 4 项 (不含 x-tdai-user-key 泄漏保护) —
 // 保留兼容, 未来可升级到 WITH_INTERNAL 版本。
-import { SKIP_REQUEST_HEADERS_HOP_BY_HOP as SKIP_REQUEST_HEADERS, filterResponseHeaders } from "../../common/constants.js";
+import { SKIP_REQUEST_HEADERS_HOP_BY_HOP as SKIP_REQUEST_HEADERS, copyUpstreamRequestHeaders, filterResponseHeaders } from "../../common/constants.js";
 
 /** Extract usage object from a block of OpenAI SSE text. */
 export function extractSseUsage(sseText: string): Record<string, unknown> | null {
@@ -285,19 +285,14 @@ function buildUpstreamBody(
  * If config.upstream.apiKey is set, it overrides the request's Authorization header
  * only for the default route (not alternate model route).
  */
-function buildUpstreamHeaders(
+export function buildUpstreamHeaders(
   c: Context,
   _config: ProxyConfig,
   target: ForwardTarget,
   sessionKey?: string,
   effectiveApiKey?: string,
 ): Record<string, string> {
-  const headers: Record<string, string> = {};
-  for (const [k, v] of c.req.raw.headers.entries()) {
-    if (!SKIP_REQUEST_HEADERS.has(k.toLowerCase())) {
-      headers[k] = v;
-    }
-  }
+  const headers = copyUpstreamRequestHeaders(c.req.raw.headers, SKIP_REQUEST_HEADERS);
   headers["content-type"] = "application/json";
 
   // `effectiveApiKey` is pre-resolved by the caller — see the resolveEffective
@@ -1193,12 +1188,7 @@ export async function runOpenaiChatPipeline(
   // default upstream (never the alternate route), so its apiKey must be applied
   // just like the first-attempt path. Without this, retry sends the
   // client's raw auth to tokenhub and gets 401.
-  const originalHeaders: Record<string, string> = {};
-  for (const [k, v] of c.req.raw.headers.entries()) {
-    if (!SKIP_REQUEST_HEADERS.has(k.toLowerCase())) {
-      originalHeaders[k] = v;
-    }
-  }
+  const originalHeaders = copyUpstreamRequestHeaders(c.req.raw.headers, SKIP_REQUEST_HEADERS);
   // Retry uses the same effective key as the primary path — when it
   // resolves to "" (agent entry present but no apiKey), retry also runs
   // on the client's own key, preserving the passthrough intent.

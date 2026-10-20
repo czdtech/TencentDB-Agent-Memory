@@ -8,10 +8,15 @@
  * ## 语义差异 (故意保留)
  *
  * 6 个 handler 里 SKIP_REQUEST_HEADERS 有两种版本:
- *   - `SKIP_REQUEST_HEADERS_HOP_BY_HOP` (4 项): handler/direct/aux 用, 只过
- *      RFC 7230 hop-by-hop 头
- *   - `SKIP_REQUEST_HEADERS_WITH_INTERNAL` (5 项): anthropic/codex/wb 用,
+ *   - `SKIP_REQUEST_HEADERS_HOP_BY_HOP` (5 项): handler/direct/aux 用, 只过
+ *      RFC 7230 hop-by-hop 头 + `accept-encoding`
+ *   - `SKIP_REQUEST_HEADERS_WITH_INTERNAL` (6 项): anthropic/codex/wb 用,
  *      在 hop-by-hop 基础上多加 `x-tdai-user-key` (proxy 内部身份头)
+ *
+ * `accept-encoding` 一律不透传上游: MemoryProxy 会剥掉响应里的
+ * `content-encoding`, 但 Node 22 的 fetch 不保证解压 zstd; 客户端一旦声明
+ * zstd, 上游会回压缩 SSE, 客户端收到无头压缩字节 (opencode 空步循环)。
+ * 各 runner 用 `copyUpstreamRequestHeaders` 显式改写成 `identity`。
  *
  * ⚠️ **潜在 bug (待 Phase 4 迁移时统一修复)**:
  *    direct/aux 用 HOP_BY_HOP 版本, 意味着如果客户端 (unlikely 场景) 主动
@@ -28,7 +33,7 @@
  */
 
 /**
- * 请求头黑名单 — hop-by-hop 版本 (4 项)。
+ * 请求头黑名单 — hop-by-hop 版本 (5 项)。
  * 原用户: handler.ts / directHandler.ts / auxiliaryHandler.ts。
  */
 export const SKIP_REQUEST_HEADERS_HOP_BY_HOP: ReadonlySet<string> = new Set([
@@ -36,10 +41,11 @@ export const SKIP_REQUEST_HEADERS_HOP_BY_HOP: ReadonlySet<string> = new Set([
   "content-length",
   "transfer-encoding",
   "connection",
+  "accept-encoding",
 ]);
 
 /**
- * 请求头黑名单 — hop-by-hop + proxy 内部身份头 (5 项)。
+ * 请求头黑名单 — hop-by-hop + proxy 内部身份头 (6 项)。
  * 原用户: anthropicHandler.ts / codexHandler.ts / workbuddyHandler.ts。
  * `x-tdai-user-key` 是 proxy 内部 session-init 才用的头, 绝不允许透传上游。
  */
@@ -49,6 +55,7 @@ export const SKIP_REQUEST_HEADERS_WITH_INTERNAL: ReadonlySet<string> = new Set([
   "transfer-encoding",
   "connection",
   "x-tdai-user-key",
+  "accept-encoding",
 ]);
 
 /**
@@ -75,4 +82,28 @@ export function filterResponseHeaders(source: Headers): Headers {
     }
   });
   return out;
+}
+
+/**
+ * 复制客户端请求头到上游请求，并强制 `accept-encoding: identity`。
+ *
+ * 不能透传客户端的 accept-encoding：MemoryProxy 会剥掉响应里的
+ * `content-encoding`，但 Node 22 的 fetch 不保证解压 zstd；一旦客户端声明
+ * zstd，上游会回压缩 SSE，客户端收到无头压缩字节（opencode 空步循环）。
+ */
+export function copyUpstreamRequestHeaders(
+  source: Headers,
+  skip: ReadonlySet<string>,
+): Record<string, string> {
+  const headers: Record<string, string> = {};
+  source.forEach((value, key) => {
+    if (!skip.has(key.toLowerCase())) {
+      headers[key] = value;
+    }
+  });
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === "accept-encoding") delete headers[key];
+  }
+  headers["accept-encoding"] = "identity";
+  return headers;
 }

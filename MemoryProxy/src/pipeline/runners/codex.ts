@@ -96,7 +96,7 @@ import {
 // ── Constants ────────────────────────────────────────────────────────────────
 
 // SKIP header sets 已合并到 common/constants.ts (codex 用 WITH_INTERNAL 版本)
-import { SKIP_REQUEST_HEADERS_WITH_INTERNAL as SKIP_REQUEST_HEADERS, filterResponseHeaders } from "../../common/constants.js";
+import { SKIP_REQUEST_HEADERS_WITH_INTERNAL as SKIP_REQUEST_HEADERS, copyUpstreamRequestHeaders, filterResponseHeaders } from "../../common/constants.js";
 
 // ── TDAI L0 helpers (对齐 anthropicHandler / handler 姿势) ───────────────────
 
@@ -253,16 +253,11 @@ export function injectCodexAssets(
 
 // ── Upstream request helpers ─────────────────────────────────────────────────
 
-function buildUpstreamHeaders(
+export function buildUpstreamHeaders(
   c: Context,
   config: ProxyConfig,
 ): Record<string, string> {
-  const headers: Record<string, string> = {};
-  for (const [k, v] of c.req.raw.headers.entries()) {
-    if (!SKIP_REQUEST_HEADERS.has(k.toLowerCase())) {
-      headers[k] = v;
-    }
-  }
+  const headers = copyUpstreamRequestHeaders(c.req.raw.headers, SKIP_REQUEST_HEADERS);
   // Codex uses OpenAI protocol: inject Bearer token
   if (config.upstream.apiKey) {
     headers["authorization"] = `Bearer ${config.upstream.apiKey}`;

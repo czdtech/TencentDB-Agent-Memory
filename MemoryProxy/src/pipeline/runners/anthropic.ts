@@ -99,7 +99,7 @@ import {
 
 // SKIP header sets 已合并到 common/constants.ts
 // anthropic 老行为: WITH_INTERNAL 5 项 (含 x-tdai-user-key 泄漏保护)
-import { SKIP_REQUEST_HEADERS_WITH_INTERNAL as SKIP_REQUEST_HEADERS, filterResponseHeaders } from "../../common/constants.js";
+import { SKIP_REQUEST_HEADERS_WITH_INTERNAL as SKIP_REQUEST_HEADERS, copyUpstreamRequestHeaders, filterResponseHeaders } from "../../common/constants.js";
 
 /**
  * Build a per-request TdaiClient. `spaceId` (extracted from the request path
@@ -342,19 +342,14 @@ function buildUpstreamBody(
 /**
  * Build upstream headers from request headers + cost guard auth overrides.
  */
-function buildUpstreamHeaders(
+export function buildUpstreamHeaders(
   c: Context,
   _config: ProxyConfig,
   target: ForwardTarget,
   sessionKey?: string,
   effectiveApiKey?: string,
 ): Record<string, string> {
-  const headers: Record<string, string> = {};
-  for (const [k, v] of c.req.raw.headers.entries()) {
-    if (!SKIP_REQUEST_HEADERS.has(k.toLowerCase())) {
-      headers[k] = v;
-    }
-  }
+  const headers = copyUpstreamRequestHeaders(c.req.raw.headers, SKIP_REQUEST_HEADERS);
   headers["content-type"] = "application/json";
 
   // `effectiveApiKey` is pre-resolved by the caller according to the
@@ -1071,12 +1066,7 @@ export async function runAnthropicPipeline(
   // default upstream (never the alternate route), so its apiKey must be applied
   // just like the first-attempt path. Without this, retry sends the
   // client's raw auth to tokenhub and gets 401.
-  const originalHeaders: Record<string, string> = {};
-  for (const [k, v] of c.req.raw.headers.entries()) {
-    if (!SKIP_REQUEST_HEADERS.has(k.toLowerCase())) {
-      originalHeaders[k] = v;
-    }
-  }
+  const originalHeaders = copyUpstreamRequestHeaders(c.req.raw.headers, SKIP_REQUEST_HEADERS);
   // Retry uses the same effective key as the primary path — same three
   // cases as above. When it resolves to "" (agent entry present but no
   // apiKey), retry also runs on the client's own key: preserves the

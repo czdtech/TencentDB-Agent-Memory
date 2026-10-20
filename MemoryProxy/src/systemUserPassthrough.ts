@@ -69,6 +69,7 @@ import {
   isRateLimitExceededError,
   recordInputTokenUsage,
 } from "./rate-limit/guard.js";
+import { copyUpstreamRequestHeaders } from "./common/constants.js";
 
 /** Hop-by-hop headers we must strip before forwarding to upstream. */
 const SKIP_REQUEST_HEADERS = new Set([
@@ -76,6 +77,7 @@ const SKIP_REQUEST_HEADERS = new Set([
   "content-length",
   "transfer-encoding",
   "connection",
+  "accept-encoding",
 ]);
 
 /** Response headers that would confuse the client if forwarded verbatim. */
@@ -96,13 +98,8 @@ const SKIP_RESPONSE_HEADERS = new Set([
  * `config.upstream.apiKey` before forwarding. `x-api-key` is dropped to avoid
  * shipping two conflicting auth headers upstream.
  */
-function buildPassthroughHeaders(c: Context, config: ProxyConfig): Record<string, string> {
-  const headers: Record<string, string> = {};
-  for (const [k, v] of c.req.raw.headers.entries()) {
-    if (!SKIP_REQUEST_HEADERS.has(k.toLowerCase())) {
-      headers[k] = v;
-    }
-  }
+export function buildPassthroughHeaders(c: Context, config: ProxyConfig): Record<string, string> {
+  const headers = copyUpstreamRequestHeaders(c.req.raw.headers, SKIP_REQUEST_HEADERS);
   if (config.upstream.apiKey) {
     for (const k of Object.keys(headers)) {
       const lower = k.toLowerCase();

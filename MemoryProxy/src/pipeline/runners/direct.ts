@@ -31,7 +31,7 @@ import {
 import { extractSpaceIdFromPath } from "../../credit-reporter.js";
 import { extractSseUsage, flattenMessagesForOpik } from "./openai-chat.js";
 import { resolveSessionKey } from "../../guard-adapter.js";
-import { SKIP_REQUEST_HEADERS_WITH_INTERNAL, filterResponseHeaders } from "../../common/constants.js";
+import { SKIP_REQUEST_HEADERS_WITH_INTERNAL, copyUpstreamRequestHeaders, filterResponseHeaders } from "../../common/constants.js";
 import {
   stripDirectPrefix,
   buildDirectUpstreamUrl,
@@ -43,14 +43,8 @@ import {
 
 /** 复制请求头 (剥离 hop-by-hop + x-tdai-user-key 内部身份头 —
  * addendum §2.4 记录的 latent leak 一并修)。 */
-function buildDirectRequestHeaders(c: Context): Record<string, string> {
-  const headers: Record<string, string> = {};
-  for (const [k, v] of c.req.raw.headers.entries()) {
-    if (!SKIP_REQUEST_HEADERS_WITH_INTERNAL.has(k.toLowerCase())) {
-      headers[k] = v;
-    }
-  }
-  return headers;
+export function buildDirectRequestHeaders(c: Context): Record<string, string> {
+  return copyUpstreamRequestHeaders(c.req.raw.headers, SKIP_REQUEST_HEADERS_WITH_INTERNAL);
 }
 
 function extractApiKey(c: Context): string {

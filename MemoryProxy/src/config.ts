@@ -50,7 +50,7 @@ const DEFAULT_SKILL_SELECTION: SkillSelectionConfig = {
 
 export const DEFAULT_CONFIG: ProxyConfig = {
   server: { host: "0.0.0.0", port: 8096, forwardTimeoutMs: 3_600_000 },
-  upstream: { url: DEFAULT_UPSTREAM, apiKey: "", agents: {} },
+  upstream: { url: DEFAULT_UPSTREAM, apiKey: "", agents: {}, clientAliases: {} },
   log: {
     file: "",
     verbose: false,
@@ -414,6 +414,7 @@ export function buildConfig(
           resolveSecret(yaml.upstream?.apiKey) ??
           DEFAULT_CONFIG.upstream.apiKey),
       agents: parseUpstreamAgents(yaml.upstream?.agents),
+      clientAliases: yaml.upstream?.clientAliases ?? {},
     },
     log: {
       file: overrides.logFile ?? yaml.log?.file ?? DEFAULT_CONFIG.log.file,

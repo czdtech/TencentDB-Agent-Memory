@@ -591,6 +591,12 @@ export interface ProxyConfig {
      * Empty / missing entry → agent falls back to `url` + `apiKey`.
      */
     agents: Record<string, AgentUpstreamEntry>;
+    /**
+     * Named route → client family. The route name still selects the upstream;
+     * the mapped client family supplies adapter / injection profile / session
+     * key. Lets a channel-named route behave exactly like a client-named one.
+     */
+    clientAliases?: Record<string, string>;
   };
   log: {
     file: string;    // JSONL path; empty string disables file logging
@@ -998,6 +1004,8 @@ export interface RawYamlConfig {
     apiKey?: string;
     /** Per-agent override map. See `AgentUpstreamEntry`. */
     agents?: Record<string, { url?: string; apiKey?: string } | null | undefined>;
+    /** Named route → client family. See `ProxyConfig.upstream.clientAliases`. */
+    clientAliases?: Record<string, string>;
   };
   log?: {
     file?: string;

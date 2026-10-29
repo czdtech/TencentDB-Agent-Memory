@@ -104,6 +104,7 @@ import { isExtractionAllowed, logExtractionSkipped } from "../../extraction-gate
 import type { CcRequestKind } from "../../common/cc-request-classifier.js";
 import { buildRequestDebugMetadata } from "../../common/langfuse-debug.js";
 import { resolveAgentAdapter } from "../../agent-adapters/index.js";
+import { resolveClientAgentSource } from "../../namedRoute.js";
 import { resolveAgentStrategy } from "../strategies/agent/index.js";
 import {
   enforceRateLimit,
@@ -517,7 +518,10 @@ export async function runAnthropicPipeline(
   const _agentFromPathEarly = _pathPartsEarly[0]
     && !["v1", "proxy", "skill-bridge", "memory-bridge"].includes(_pathPartsEarly[0])
     ? _pathPartsEarly[0] : undefined;
-  const _agentSourceEarly = _agentFromPathEarly ?? "claude-code";
+  const _agentSourceEarly = resolveClientAgentSource(
+    _agentFromPathEarly ?? "claude-code",
+    config.upstream.clientAliases,
+  );
   const agentAdapter = resolveAgentAdapter(_agentSourceEarly);
   // Resolve AgentStrategy early to gate downstream stages (identity, model gate,
   // opik, credit, rate-limit, telemetry). Default = full preset (100% behavior
@@ -623,7 +627,12 @@ export async function runAnthropicPipeline(
   const pathParts = c.req.path.split("/").filter(Boolean);
   const agentFromPath = pathParts[0] && !["v1", "proxy", "skill-bridge", "memory-bridge"].includes(pathParts[0])
     ? pathParts[0] : undefined;
-  const agentSource = agentFromPath ?? "claude-code";
+  // The route name selects the upstream; the client family (adapter, injection
+  // profile, session key) may differ — e.g. a channel-named route that speaks pi.
+  const agentSource = resolveClientAgentSource(
+    agentFromPath ?? "claude-code",
+    config.upstream.clientAliases,
+  );
 
   // ── Identity inspection ──────────────────────────────────────────────────
   const reqHeaders: Record<string, string> = {};

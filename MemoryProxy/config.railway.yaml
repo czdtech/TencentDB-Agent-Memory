@@ -5,6 +5,12 @@ server:
 upstream:
   url: https://new-api-production-e8f1.up.railway.app/v1
   apiKey: "${PROXY_UPSTREAM_API_KEY}"
+  # 首段既选上游（agents 表），也决定客户端家族（adapter / 注入 profile / 会话前缀）。
+  # 渠道名路由在这里映射回真实客户端，让「渠道门牌」与「客户端门牌」行为一致：
+  # OMP 是 pi 家族（oh-my-pi），system prompt 是 pi 形态，所以走 pi profile。
+  # 注意：带 sessionInit.routeIdentities 预设的路由不要加别名 —— 预设按原始路由名查找。
+  clientAliases:
+    cliproxyapi-tencent-gemini: pi
   # 这里的 name 只做一件事：按 URL 第一段选「上游 + 上游 key」。
   # 记忆身份不在这张表上 —— 一律由客户端请求头 x-team-id / x-agent-id / x-task-id
   # 决定（见 sessionInit.routeIdentities 的说明）。删掉某个条目会让该路由退回

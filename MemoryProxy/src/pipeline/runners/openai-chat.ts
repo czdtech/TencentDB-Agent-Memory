@@ -41,6 +41,7 @@ import {
 } from "../../common/cfq-strip.js";
 import { withStreamIdleWarning } from "../../common/stream-idle-watchdog.js";
 import { tryReportCreditFromPath, extractSpaceIdFromPath } from "../../credit-reporter.js";
+import { resolveClientAgentSource } from "../../namedRoute.js";
 import {
   getInstanceUpstreamConfigs,
   resolveForAgent,
@@ -500,7 +501,10 @@ export async function runOpenaiChatPipeline(
   const _pathPartsEarly = c.req.path.split("/").filter(Boolean);
   const _agentFromPathEarly = _pathPartsEarly[0] && !["v1", "proxy", "skill-bridge", "memory-bridge"].includes(_pathPartsEarly[0])
     ? _pathPartsEarly[0] : undefined;
-  const _agentSourceEarly = _agentFromPathEarly ?? "claude-code";
+  const _agentSourceEarly = resolveClientAgentSource(
+    _agentFromPathEarly ?? "claude-code",
+    config.upstream.clientAliases,
+  );
   const _agentStrategy = resolveAgentStrategy(_agentSourceEarly);
   const _gates = _agentStrategy.stageGates;
 
@@ -598,7 +602,12 @@ export async function runOpenaiChatPipeline(
   const pathParts = c.req.path.split("/").filter(Boolean);
   const agentFromPath = pathParts[0] && !["v1", "proxy", "skill-bridge", "memory-bridge"].includes(pathParts[0])
     ? pathParts[0] : undefined;
-  const agentSource = agentFromPath ?? "claude-code";
+  // The route name selects the upstream; the client family (adapter, injection
+  // profile, session key) may differ — e.g. a channel-named route that speaks pi.
+  const agentSource = resolveClientAgentSource(
+    agentFromPath ?? "claude-code",
+    config.upstream.clientAliases,
+  );
   // _agentStrategy / _gates 已在前面 resolve (agentSource 也许 differs from _agentSourceEarly
   // 因为下面 pathParts 用 filter(Boolean)[0] 提取; 早期资源用同样规则应等价)
 

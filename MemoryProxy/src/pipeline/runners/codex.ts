@@ -435,7 +435,10 @@ export async function runCodexPipeline(
   // ── 6. Session ID extraction ───────────────────────────────────────────────
   const sessionId = extractCodexSessionId(headers, body);
   const sessionKey = sessionId ?? `${keyId}:${traceId}`;
-  const agentSource = resolveClientAgentSource(resolveNamedRoute(path, "codex"));
+  const agentSource = resolveClientAgentSource(
+    resolveNamedRoute(path, "codex"),
+    config.upstream.clientAliases,
+  );
   const isStream = body.stream !== false;
   const sessionTurnSeed = createSessionTurnSeed(config, {
     agent: agentSource,

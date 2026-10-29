@@ -28,7 +28,7 @@ function makePipe() {
 
 const body = { model: "gemini-3.8-flash-high", messages: [{ role: "user", content: "test prompt" }] };
 
-function run(pipe: ReturnType<typeof makePipe>, target: ForwardTarget, timeoutBehavior: "gated" | "always") {
+function run(pipe: ReturnType<typeof makePipe>, target: ForwardTarget) {
   return stageForwardWithRetry({
     target,
     upstreamHeaders: { "content-type": "application/json" },
@@ -38,7 +38,6 @@ function run(pipe: ReturnType<typeof makePipe>, target: ForwardTarget, timeoutBe
     pipe,
     forwardTimeoutMs: 5000,
     protocol: "openai",
-    timeoutBehavior,
     buildRetryBody: (original, retryModel) => ({ ...original, model: retryModel }),
   });
 }
@@ -64,7 +63,7 @@ describe("stageForwardWithRetry transient 502/503/504 in-place retry", () => {
     });
 
     const pipe = makePipe();
-    const res = await run(pipe, makeTarget(), "gated");
+    const res = await run(pipe, makeTarget());
 
     expect(calls).toHaveLength(2);
     expect(JSON.parse(calls[0].init?.body as string)).toEqual(JSON.parse(calls[1].init?.body as string));
@@ -79,7 +78,7 @@ describe("stageForwardWithRetry transient 502/503/504 in-place retry", () => {
       return jsonResponse({ error: { message: "Bad Gateway Permanent" } }, 502);
     });
 
-    const res = await run(makePipe(), makeTarget(), "gated");
+    const res = await run(makePipe(), makeTarget());
 
     expect(calls).toBe(2);
     expect(res.resp.status).toBe(502);
@@ -94,7 +93,7 @@ describe("stageForwardWithRetry transient 502/503/504 in-place retry", () => {
     });
 
     const pipe = makePipe();
-    const res = await run(pipe, makeTarget(), "gated");
+    const res = await run(pipe, makeTarget());
 
     expect(calls).toBe(2);
     expect(res.resp.status).toBe(400);
@@ -110,7 +109,7 @@ describe("stageForwardWithRetry transient 502/503/504 in-place retry", () => {
 
     const target = makeTarget({ retryTarget: { url: "https://upstream.test/v1", model: "fallback-model" } as never });
     const pipe = makePipe();
-    const res = await run(pipe, target, "gated");
+    const res = await run(pipe, target);
 
     // retryTarget 存在时不就地重试；502 也不落在 routed-model 的 4xx 重试区间
     expect(calls).toBe(1);
@@ -128,7 +127,7 @@ describe("stageForwardWithRetry transient 502/503/504 in-place retry", () => {
     });
 
     const pipe = makePipe();
-    await expect(run(pipe, makeTarget(), "always")).rejects.toThrow();
+    await expect(run(pipe, makeTarget())).rejects.toThrow();
 
     expect(calls).toBe(1);
     expect(pipe.error).toHaveBeenCalledWith("FORWARD", expect.stringContaining("Timeout"));

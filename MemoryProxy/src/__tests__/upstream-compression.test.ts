@@ -95,7 +95,6 @@ async function forward(headers: Record<string, string>, body: Record<string, unk
     pipe: makePipe(),
     forwardTimeoutMs: 5000,
     protocol: "openai",
-    timeoutBehavior: "gated",
     buildRetryBody: (original, retryModel) => ({ ...original, model: retryModel }),
   });
 }

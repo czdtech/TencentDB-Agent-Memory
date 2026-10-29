@@ -10,10 +10,12 @@ describe("resolveNamedRoute", () => {
     expect(resolveNamedRoute("/v1/responses", "codex")).toBe("codex");
   });
 
-  it("keeps the cc-no provider alias on the Claude Code client family", () => {
-    expect(resolveClientAgentSource("tencent-cc-no")).toBe("claude-code");
+  it("treats a leading /responses as a protocol word, not an agent name", () => {
+    expect(resolveNamedRoute("/responses/space-1", "codex")).toBe("codex");
   });
+});
 
+describe("resolveClientAgentSource", () => {
   it("maps a configured channel route to its client family", () => {
     expect(
       resolveClientAgentSource("cliproxyapi-tencent-gemini", {
@@ -22,14 +24,9 @@ describe("resolveNamedRoute", () => {
     ).toBe("pi");
   });
 
-  it("lets config override a builtin alias", () => {
-    expect(
-      resolveClientAgentSource("tencent-cc-no", { "tencent-cc-no": "codebuddy" }),
-    ).toBe("codebuddy");
-  });
-
-  it("passes client-named routes through unchanged", () => {
+  it("passes routes without an alias through unchanged", () => {
     expect(resolveClientAgentSource("claude-code", {})).toBe("claude-code");
     expect(resolveClientAgentSource("codex", {})).toBe("codex");
+    expect(resolveClientAgentSource("claude-code")).toBe("claude-code");
   });
 });

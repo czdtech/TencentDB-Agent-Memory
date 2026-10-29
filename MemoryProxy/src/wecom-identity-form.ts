@@ -17,7 +17,7 @@ type WireProtocol = "openai" | "anthropic" | "responses";
 export function hasExplicitAgentName(requestPath: string): boolean {
   const first = requestPath.split("/").filter(Boolean)[0];
   return Boolean(first && !new Set([
-    "v1", "proxy", "direct", "skill-bridge", "memory-bridge",
+    "v1", "responses", "proxy", "direct", "skill-bridge", "memory-bridge",
   ]).has(first));
 }
 

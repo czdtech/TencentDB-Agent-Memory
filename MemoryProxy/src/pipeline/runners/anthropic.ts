@@ -516,7 +516,7 @@ export async function runAnthropicPipeline(
   // 详见 docs/design/2026-07-30-cc-request-routing-plan.md
   const _pathPartsEarly = c.req.path.split("/").filter(Boolean);
   const _agentFromPathEarly = _pathPartsEarly[0]
-    && !["v1", "proxy", "skill-bridge", "memory-bridge"].includes(_pathPartsEarly[0])
+    && !["v1", "responses", "proxy", "skill-bridge", "memory-bridge"].includes(_pathPartsEarly[0])
     ? _pathPartsEarly[0] : undefined;
   const _agentSourceEarly = resolveClientAgentSource(
     _agentFromPathEarly ?? "claude-code",
@@ -625,7 +625,7 @@ export async function runAnthropicPipeline(
 
   // ── Resolve agent source from URL path (e.g. /claude-code/v1/messages) ──
   const pathParts = c.req.path.split("/").filter(Boolean);
-  const agentFromPath = pathParts[0] && !["v1", "proxy", "skill-bridge", "memory-bridge"].includes(pathParts[0])
+  const agentFromPath = pathParts[0] && !["v1", "responses", "proxy", "skill-bridge", "memory-bridge"].includes(pathParts[0])
     ? pathParts[0] : undefined;
   // The route name selects the upstream; the client family (adapter, injection
   // profile, session key) may differ — e.g. a channel-named route that speaks pi.

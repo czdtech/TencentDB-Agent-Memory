@@ -6,11 +6,6 @@ export function resolveNamedRoute(requestPath: string, fallbackAgent: string): s
   return protocolSegments.has(parts[0]) ? fallbackAgent : parts[0];
 }
 
-/** Aliases that predate the config-driven map (kept for existing deployments). */
-const BUILTIN_CLIENT_ALIASES: Record<string, string> = {
-  "tencent-cc-no": "claude-code",
-};
-
 /**
  * Map a named route to the client family whose dialect/session behavior applies.
  * The route name keeps selecting the upstream (`upstream.agents[route]`); only
@@ -21,5 +16,5 @@ export function resolveClientAgentSource(
   routeName: string,
   aliases?: Record<string, string>,
 ): string {
-  return aliases?.[routeName] ?? BUILTIN_CLIENT_ALIASES[routeName] ?? routeName;
+  return aliases?.[routeName] ?? routeName;
 }

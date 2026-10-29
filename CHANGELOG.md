@@ -9,6 +9,31 @@
 
 ---
 
+## [2.0.3-fork.1] — 2026-10-29
+
+fork（`czdtech/TencentDB-Agent-Memory`）的部署发布，非上游版本号。
+
+### 🔄 追平上游 `ecc01a5`
+
+- 并入 v2.0.3 正式版（`084bed4`）及其后三个补丁：跨团队 agent/task 读权限校验（`afadb9a`）、面板语言存储不可用时的容错（`39c4918`）、SDK-Python 强制有限 v3 传输超时（`ecc01a5`）
+- 冲突裁决：fork 独有的 proxy 路由/ACL/SSE、ops 端点 fail-closed、memory-bridge 只读、lockfile 依赖源等补丁全部保留并重贴；proxy 测试跟随上游移除 `timeoutBehavior` 的接口变更
+- 不跟进上游 `.github/workflows/pr-auto-reply.yml`：fork 的 GitHub token 无 `workflow` scope，且该 workflow 与 Railway 部署无关
+
+### ✅ 发布验证（Railway `tdam-cloud`）
+
+- 三服务（core / proxy / hub）由 `0e20fc9` 重建至 `8c315a5` 并达到 SUCCESS，旧部署已移除
+- `/health`：hub 200（panel、knowledge 均可用），proxy 200（sqlite 存储未降级）
+- 真实请求：`opencode` 路由 + `deepseek-chat` 返回 200，身份注入生效（`injectedSkipped=false`）
+- L0：写入、按 team/agent/user 读回、按 message_id 删除后复查为 0，全部通过
+- knowledge 门禁：缺 hub token 401，缺 service-id / knowledge_id 400，格式错 400，不存在 404
+
+### ⚠️ 运维须知
+
+- 跨团队读取不再返回 403，而是 404（不暴露存在性）+ 列表返回空，对应 `afadb9a` 的权限收紧
+- 记忆注入依赖客户端提供会话 ID（`x-conversation-id` / `x-session-id` 等）；未提供时该轮跳过注入与 L0 写入，会话 key 回退为 keyId 派生值
+- `default` 服务下 wiki / code-graph 资产当前为空（`cg-kj3ecamw` 已不存在），相关工具只会返回 404
+- proxy 未配 Redis，限流实际为 fail-open（`/health` 仍报 `rateLimit: enabled`）
+
 ## [2.0.3] — 2026-10-26
 
 ### 🔁 会话默认绑定
